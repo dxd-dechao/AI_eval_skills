@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SmartCampus — Eval & Observability Architecture</title>
+<!-- Theme derived from apps/web: primary #0f766e, bg #F0FDF4, accent #14b8a6, fonts DM Sans + Instrument Serif (tailwind.config.ts, globals.css) -->
+<style>
+  :root {
+    --primary: #0f766e;
+    --primary-light: #14b8a6;
+    --primary-bg: #F0FDF4;
+    --surface: #ffffff;
+    --surface-alt: #f0fdfa;
+    --border: #d1fae5;
+    --border-strong: #99f6e4;
+    --text: #1a2e2a;
+    --text-muted: #5f7c76;
+    --accent-llm: #f59e0b;
+    --accent-llm-bg: #fef3c7;
+    --accent-det: #0f766e;
+    --accent-det-bg: #ccfbf1;
+    --accent-managed: #7c3aed;
+    --accent-managed-bg: #ede9fe;
+    --accent-gateway: #d97706;
+    --accent-gateway-bg: #fef3c7;
+    --danger: #dc2626;
+    --success: #16a34a;
+    --warning: #f59e0b;
+    --font-heading: 'Instrument Serif', Georgia, serif;
+    --font-body: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    --radius: 8px;
+    --radius-lg: 12px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: var(--font-body);
+    color: var(--text);
+    background: var(--primary-bg);
+    line-height: 1.6;
+    padding: 2rem;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+
+  h1 { font-family: var(--font-heading); font-size: 2.2rem; color: var(--primary); margin-bottom: 0.25rem; }
+  h2 { font-family: var(--font-heading); font-size: 1.6rem; color: var(--primary); margin: 2.5rem 0 1rem; border-bottom: 2px solid var(--border-strong); padding-bottom: 0.5rem; }
+  h3 { font-size: 1.1rem; color: var(--primary); margin: 1.5rem 0 0.75rem; }
+
+  .version { color: var(--text-muted); font-size: 0.9rem; margin-bottom: 2rem; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 1px 3px rgba(15,118,110,0.06);
+  }
+
+  /* Service Tiers */
+  .tier-grid { display: grid; gap: 1rem; }
+  .tier-row {
+    display: grid;
+    grid-template-columns: 160px 1fr;
+    gap: 1rem;
+    align-items: start;
+  }
+  .tier-label {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.4rem 1rem;
+    border-radius: 20px;
+    font-weight: 600;
+    font-size: 0.85rem;
+    white-space: nowrap;
+    height: fit-content;
+    margin-top: 0.5rem;
+  }
+  .tier-label.frontend { background: var(--accent-det-bg); color: var(--accent-det); }
+  .tier-label.gateway { background: var(--accent-gateway-bg); color: var(--accent-gateway); }
+  .tier-label.backend { background: #dbeafe; color: #1d4ed8; }
+  .tier-label.managed { background: var(--accent-managed-bg); color: var(--accent-managed); }
+  .tier-label.gpu { background: #fce7f3; color: #be185d; }
+
+  .tier-services { display: flex; flex-wrap: wrap; gap: 0.75rem; }
+  .service-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.75rem 1rem;
+    min-width: 180px;
+    flex: 1;
+    max-width: 280px;
+  }
+  .service-box strong { display: block; font-size: 0.9rem; color: var(--text); }
+  .service-box small { color: var(--text-muted); font-size: 0.78rem; line-height: 1.4; }
+
+  /* Data Flow */
+  .flow-container { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; padding: 1rem 0; }
+  .flow-box {
+    border-radius: var(--radius);
+    padding: 0.6rem 1rem;
+    text-align: center;
+    min-width: 120px;
+    font-size: 0.82rem;
+  }
+  .flow-box strong { display: block; font-size: 0.85rem; }
+  .flow-box.llm { background: var(--accent-llm-bg); border: 1.5px solid var(--accent-llm); }
+  .flow-box.det { background: var(--accent-det-bg); border: 1.5px solid var(--accent-det); }
+  .flow-box.proc { background: #f1f5f9; border: 1.5px solid #94a3b8; }
+  .flow-arrow { color: var(--text-muted); font-size: 1.2rem; font-weight: bold; }
+
+  /* Eval layers */
+  .eval-layers { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+  .eval-layer {
+    border-radius: var(--radius-lg);
+    padding: 1.25rem;
+  }
+  .eval-layer.l2 { background: #ecfdf5; border: 2px solid var(--primary-light); }
+  .eval-layer.l1 { background: #f0f9ff; border: 2px solid #38bdf8; }
+  .eval-layer h4 { margin-bottom: 0.5rem; }
+
+  /* Dataset viz */
+  .dataset-bar { display: flex; border-radius: var(--radius); overflow: hidden; height: 32px; margin: 1rem 0; }
+  .dataset-bar .seg { display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 600; color: white; }
+  .seg.positive { background: var(--success); }
+  .seg.edge { background: var(--warning); }
+  .seg.negative { background: #64748b; }
+  .seg.adversarial { background: var(--danger); }
+
+  /* Trace tree */
+  .trace-block {
+    border-left: 4px solid var(--primary);
+    background: var(--surface-alt);
+    padding: 1.25rem 1.5rem;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 0.78rem;
+    line-height: 1.7;
+    border-radius: 0 var(--radius) var(--radius) 0;
+    overflow-x: auto;
+    white-space: pre;
+  }
+  .trace-block .gen { color: var(--accent-llm); font-weight: 600; }
+  .trace-block .span-label { color: var(--text); font-weight: 700; }
+  .trace-block .meta { color: var(--text-muted); }
+
+  /* Metrics table */
+  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin: 1rem 0; }
+  th { background: var(--surface-alt); text-align: left; padding: 0.6rem 0.75rem; border-bottom: 2px solid var(--border-strong); font-weight: 600; }
+  td { padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border); }
+  tr:hover { background: var(--surface-alt); }
+
+  .status-badge {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    border-radius: 10px;
+    font-size: 0.72rem;
+    font-weight: 600;
+  }
+  .status-badge.planned { background: #fef3c7; color: #92400e; }
+  .status-badge.tbd { background: #f1f5f9; color: #475569; }
+  .status-badge.exists { background: #d1fae5; color: #065f46; }
+
+  /* Phases timeline */
+  .timeline { display: flex; gap: 0; margin: 1.5rem 0; }
+  .phase-block {
+    flex: 1;
+    padding: 0.75rem;
+    text-align: center;
+    font-size: 0.78rem;
+    border: 1px solid var(--border);
+    position: relative;
+  }
+  .phase-block:first-child { border-radius: var(--radius) 0 0 var(--radius); }
+  .phase-block:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
+  .phase-block strong { display: block; color: var(--primary); }
+
+  /* Matrix */
+  .matrix-scroll { overflow-x: auto; }
+
+  @media (max-width: 768px) {
+    .tier-row { grid-template-columns: 1fr; }
+    .eval-layers { grid-template-columns: 1fr; }
+    .flow-container { flex-direction: column; }
+    body { padding: 1rem; }
+  }
+
+  @media print {
+    body { background: white; }
+    .card { box-shadow: none; border: 1px solid #ccc; }
+  }
+</style>
+</head>
+<body>
+
+<h1>SmartCampus — Eval & Observability Architecture</h1>
+<p class="version">Version: Draft 1.2 — Jul 7, 2026</p>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<h2>1. System Architecture</h2>
+
+<h3>Service Tiers</h3>
+<div class="card">
+  <div class="tier-grid">
+    <div class="tier-row">
+      <span class="tier-label frontend">Frontend</span>
+      <div class="tier-services">
+        <div class="service-box">
+          <strong>labs-smartcampus-fe</strong>
+          <small>Next.js 16 CSR · port 3008<br>Dashboard, analysis UI, search</small>
+        </div>
+      </div>
+    </div>
+    <div class="tier-row">
+      <span class="tier-label gateway">Gateway / BFF</span>
+      <div class="tier-services">
+        <div class="service-box">
+          <strong>labs-smartcampus-bff</strong>
+          <small>FastAPI · port 8000<br>Cognito auth + /api proxy</small>
+        </div>
+      </div>
+    </div>
+    <div class="tier-row">
+      <span class="tier-label backend">Backend</span>
+      <div class="tier-services">
+        <div class="service-box">
+          <strong>labs-smartcampus</strong>
+          <small>FastAPI · port 8003<br>Analysis pipeline, search, faces</small>
+        </div>
+      </div>
+    </div>
+    <div class="tier-row">
+      <span class="tier-label gpu">GPU Sidecars</span>
+      <div class="tier-services">
+        <div class="service-box">
+          <strong>labs-smartcampus-dfine</strong>
+          <small>D-FINE · L4 GPU<br>Person detection (ROI)</small>
+        </div>
+        <div class="service-box">
+          <strong>labs-smartcampus-face</strong>
+          <small>InsightFace · L4 GPU<br>Face embed (512-d ArcFace)</small>
+        </div>
+      </div>
+    </div>
+    <div class="tier-row">
+      <span class="tier-label managed">Managed Services</span>
+      <div class="tier-services">
+        <div class="service-box">
+          <strong>Firestore</strong>
+          <small>labs-smartcampus<br>Analysis, events, videos, faces</small>
+        </div>
+        <div class="service-box">
+          <strong>GCS</strong>
+          <small>prototype_web_apps<br>Video storage, thumbnails</small>
+        </div>
+        <div class="service-box">
+          <strong>Cloud Tasks</strong>
+          <small>smartcampus-pipeline<br>Async pipeline orchestration</small>
+        </div>
+        <div class="service-box">
+          <strong>S3 Vectors</strong>
+          <small>labs-smartcampus (AWS)<br>videoclips (1536d) + faces (512d)</small>
+        </div>
+        <div class="service-box">
+          <strong>Gemini API</strong>
+          <small>gemini-3-flash-preview<br>Video analysis + embeddings</small>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<h3>Data Flow — Video Analysis Pipeline</h3>
+<div class="card">
+  <div class="flow-container">
+    <div class="flow-box proc"><strong>Upload</strong>Video → GCS</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box proc"><strong>Chunk</strong>Split by duration</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box llm"><strong>Gemini</strong>Per-chunk analysis</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box proc"><strong>Merge</strong>Offset + dedup</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box proc"><strong>Combine</strong>Multi-duration</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box llm"><strong>Summary</strong>Triage generation</div>
+  </div>
+  <div class="flow-container" style="margin-top: 0.5rem; padding-left: 2rem;">
+    <small style="color: var(--text-muted); margin-right: 1rem;">Parallel post-processing:</small>
+    <div class="flow-box llm" style="min-width: 100px;"><strong>Embed</strong>gemini-embedding-2</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box proc"><strong>Index</strong>S3 Vectors (clips)</div>
+    <span style="margin: 0 1rem; color: var(--text-muted);">|</span>
+    <div class="flow-box det"><strong>InsightFace</strong>Face detect+embed</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box proc"><strong>Index</strong>S3 Vectors (faces)</div>
+  </div>
+  <div style="margin-top: 0.75rem; font-size: 0.78rem; color: var(--text-muted);">
+    <span style="display: inline-block; width: 12px; height: 12px; background: var(--accent-llm-bg); border: 1.5px solid var(--accent-llm); border-radius: 3px; margin-right: 4px;"></span> LLM (non-deterministic)
+    <span style="margin-left: 1rem; display: inline-block; width: 12px; height: 12px; background: var(--accent-det-bg); border: 1.5px solid var(--accent-det); border-radius: 3px; margin-right: 4px;"></span> Deterministic model
+    <span style="margin-left: 1rem; display: inline-block; width: 12px; height: 12px; background: #f1f5f9; border: 1.5px solid #94a3b8; border-radius: 3px; margin-right: 4px;"></span> Processing logic
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<h2>2. AI Pipeline Detail</h2>
+
+<div class="card">
+<table>
+<thead><tr><th>Stage</th><th>Model</th><th>Type</th><th>Input</th><th>Output</th><th>Config by</th></tr></thead>
+<tbody>
+<tr><td>Video Analysis</td><td>Gemini 3 Flash</td><td>Non-deterministic (LLM)</td><td>Video chunk + venue prompt</td><td>Structured JSON (incidents, flags, scene)</td><td>Venue template</td></tr>
+<tr><td>Summary</td><td>Gemini 3 Flash</td><td>Non-deterministic (LLM)</td><td>Event list (max 80)</td><td>Triage groups (review/noise)</td><td>Summary prompt</td></tr>
+<tr><td>Embedding</td><td>gemini-embedding-2</td><td>Deterministic (embedding)</td><td>Caption text per chunk</td><td>1536-d vector</td><td>Fixed</td></tr>
+<tr><td>Person Detection</td><td>D-FINE small</td><td>Deterministic (CV)</td><td>Video frames (2 fps)</td><td>Person bboxes + tracks</td><td>Score threshold, ROI</td></tr>
+<tr><td>Face Embed</td><td>InsightFace buffalo_l</td><td>Deterministic (CV)</td><td>Video frames (0.5 fps)</td><td>512-d face embeddings + crops</td><td>Det threshold, quality gates</td></tr>
+<tr><td>Query Rewrite</td><td>Gemini 3 Flash</td><td>Non-deterministic (LLM)</td><td>User search query</td><td>Expanded/clarified query</td><td>Rewrite prompt</td></tr>
+</tbody>
+</table>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<h2>3. Eval Strategy Overview</h2>
+
+<h3>AI Eval Scope — What's In, What's Out</h3>
+<div class="card">
+<table>
+<thead><tr><th>Component</th><th>In AI eval?</th><th>How it's covered</th></tr></thead>
+<tbody>
+<tr><td>Gemini video analysis (detection, timestamps, descriptions, confidence)</td><td><span class="status-badge exists">Yes — core</span></td><td>Golden dataset + unified LLM judge + N-run consistency</td></tr>
+<tr><td>Venue templates / prompt changes</td><td><span class="status-badge exists">Yes — gated</span></td><td>Every edit re-runs the eval; template-injection adversarial cases</td></tr>
+<tr><td>Summary generation (Gemini 2nd pass)</td><td><span class="status-badge exists">Yes</span></td><td>Triage recall/precision + faithfulness rubric</td></tr>
+<tr><td>Semantic search (query rewrite + embedding + kNN)</td><td><span class="status-badge exists">Yes</span></td><td>Query→clip golden set: Recall@k, MRR; rewrite A/B ablation</td></tr>
+<tr><td>D-FINE person detection</td><td><span class="status-badge exists">Yes</span></td><td>Classic ML metrics (mAP, recall) — low cadence</td></tr>
+<tr><td>InsightFace + gallery thresholds (0.70/0.55)</td><td><span class="status-badge exists">Yes + fairness</span></td><td>FAR/FRR per tier, stratified by demographic axes</td></tr>
+<tr><td>Merge / combine / caption construction</td><td><span class="status-badge planned">Indirect</span></td><td>Unit tests + boundary golden-set segments evaluated end-to-end</td></tr>
+<tr><td>Prompt builder, chunking, orchestration, storage, tenant filters, display logic</td><td><span class="status-badge tbd">No</span></td><td>Unit / integration / security tests — deterministic code</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="eval-layers">
+  <div class="eval-layer l2">
+    <h4>Layer 2: End-to-End (Ship Gate)</h4>
+    <p style="font-size: 0.85rem; margin-bottom: 0.5rem;">Does the whole system produce correct incident timelines?</p>
+    <ul style="font-size: 0.82rem; padding-left: 1.2rem;">
+      <li>Detection recall ≥ 0.90 (P0) / 0.80 (P1)</li>
+      <li>Precision ≥ 0.75 (P0) / 0.80 (P1)</li>
+      <li>Classification accuracy ≥ 0.85</li>
+      <li>Temporal IoU mean ≥ 0.60</li>
+      <li>FP rate on negatives ≤ 0.05</li>
+      <li><em>All per venue_type, lower CI bound</em></li>
+    </ul>
+  </div>
+  <div class="eval-layer l1">
+    <h4>Layer 1: Component Diagnostics</h4>
+    <p style="font-size: 0.85rem; margin-bottom: 0.5rem;">Which stage is the bottleneck?</p>
+    <ul style="font-size: 0.82rem; padding-left: 1.2rem;">
+      <li>Gemini per-chunk: isolated recall/precision</li>
+      <li>Merge: completeness, no duplication</li>
+      <li>D-FINE: mAP@0.5 ≥ 0.85</li>
+      <li>InsightFace: TAR@FAR=0.01 ≥ 0.90</li>
+      <li>Summary: P0 recall in review group = 1.0</li>
+      <li>Semantic search: Recall@10 ≥ 0.85, MRR@10 ≥ 0.60</li>
+    </ul>
+  </div>
+</div>
+
+<div class="card" style="margin-top: 1.5rem;">
+  <h4 style="margin-bottom: 0.75rem;">Unified LLM Judge (one call, all metrics)</h4>
+  <div class="flow-container">
+    <div class="flow-box proc"><strong>Eval item</strong>video + system events + ground truth</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box llm"><strong>Unified judge</strong>Gemini 2.5 Pro · 1 call</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box proc"><strong>Strict JSON</strong>alignments: verdict + 4 scores</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box det"><strong>Deterministic code</strong>computes all judge metrics</div>
+  </div>
+  <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 0.5rem;">
+    The judge aligns system events to ground-truth events (bipartite matching) and scores each aligned pair on
+    <strong>type</strong>, <strong>temporal</strong>, <strong>faithfulness</strong>, and <strong>severity</strong> (1–5, rubric per field).
+    Detection recall/precision derive from the alignment verdicts (detected / partial / missed / fabricated).
+    Replaces five separate judges: one shared alignment decision, ~5× fewer calls, one calibration artifact
+    (per-field gates: verdict κ ≥ 0.7; scores r ≥ 0.8 / 0.75; alignment agreement ≥ 0.85).
+  </p>
+</div>
+
+<div class="card" style="margin-top: 1.5rem;">
+  <h4 style="margin-bottom: 0.75rem;">Error Analysis Flow</h4>
+  <div style="font-size: 0.82rem; font-family: monospace; line-height: 1.8; background: var(--surface-alt); padding: 1rem; border-radius: var(--radius);">
+L2 drop beyond trigger_threshold?<br>
+├─ NO → Log. No action.<br>
+└─ YES → Pull traces for degraded venue_type<br>
+&nbsp;&nbsp;&nbsp;&nbsp;├─ High FP → Check Gemini hallucination (Stage 1)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;├─ High FN → Check boundary recall (Stage 2) + chunk recall (Stage 1)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;├─ Classification drop → Check template version / behaviour defs<br>
+&nbsp;&nbsp;&nbsp;&nbsp;├─ Temporal drop → Check merge logic (Stage 2) + chunk timestamps<br>
+&nbsp;&nbsp;&nbsp;&nbsp;└─ Search quality drop → Stage 7 on pinned corpus; if it passes → caption quality (Stage 1)
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<h2>4. Golden Dataset Plan</h2>
+
+<h3>Segment Split (750 items, Phase 1)</h3>
+<div class="card">
+  <div class="dataset-bar">
+    <div class="seg positive" style="width: 25%;">Positive 25%</div>
+    <div class="seg edge" style="width: 20%;">Edge Case 20%</div>
+    <div class="seg negative" style="width: 41%;">Negative 41%</div>
+    <div class="seg adversarial" style="width: 14%;">Adversarial 14%</div>
+  </div>
+  <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.5rem; font-size: 0.8rem; text-align: center;">
+    <div><strong>190</strong><br>Real incidents across 6 venues</div>
+    <div><strong>150</strong><br>Look-alikes, boundary, ambiguous</div>
+    <div><strong>310</strong><br>Normal activity per venue</div>
+    <div><strong>100</strong><br>Injection, malformed, OOD, FP triggers</div>
+  </div>
+</div>
+
+<h3>Venue × Behaviour Matrix</h3>
+<div class="card matrix-scroll">
+<table>
+<thead><tr><th>Venue</th><th>P0 Safety</th><th>P1 Accusation</th><th>P2 Environmental</th><th>Total Positives</th></tr></thead>
+<tbody>
+<tr><td>Classroom</td><td>20</td><td>10</td><td>5</td><td>35</td></tr>
+<tr><td>Exam Hall</td><td>—</td><td>25</td><td>—</td><td>25</td></tr>
+<tr><td>Canteen</td><td>10</td><td>—</td><td>10</td><td>20</td></tr>
+<tr><td>Library</td><td>—</td><td>5</td><td>10</td><td>15</td></tr>
+<tr><td>Corridor</td><td>15</td><td>—</td><td>15</td><td>30</td></tr>
+<tr><td>Playground</td><td>15</td><td>—</td><td>5</td><td>20</td></tr>
+<tr><td>Generic</td><td>5</td><td>5</td><td>5</td><td>15</td></tr>
+<tr><td>Multi-incident</td><td>15</td><td>10</td><td>5</td><td>30</td></tr>
+<tr style="font-weight: 700;"><td>Total</td><td>80</td><td>55</td><td>55</td><td>190</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3>Phased Rollout</h3>
+<div class="card">
+  <div class="timeline">
+    <div class="phase-block" style="background: #ecfdf5;">
+      <strong>Phase 0</strong>
+      Jul 2026<br>
+      Spec + IRB
+    </div>
+    <div class="phase-block" style="background: #f0f9ff;">
+      <strong>Phase 1</strong>
+      Aug–Sep 2026<br>
+      Capture 750 clips
+    </div>
+    <div class="phase-block" style="background: #fef3c7;">
+      <strong>Phase 2</strong>
+      Oct–Nov 2026<br>
+      Annotate + adjudicate
+    </div>
+    <div class="phase-block" style="background: #ede9fe;">
+      <strong>Phase 3</strong>
+      Dec 2026<br>
+      Baseline + calibrate judges
+    </div>
+    <div class="phase-block" style="background: #fce7f3;">
+      <strong>Phase 4</strong>
+      Jan 2027+<br>
+      Ongoing eval gate
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<h2>5. Observability Roadmap (Langfuse)</h2>
+
+<h3>Trace Structure</h3>
+<div class="card">
+  <div class="trace-block"><span class="span-label">Trace:</span> analysis_{id} <span class="meta">(one per video analysis run)</span>
+├── <span class="span-label">Span:</span> "pipeline_init"
+├── <span class="span-label">Span:</span> "batch_0"
+│   ├── <span class="span-label">Span:</span> "chunk_0" → <span class="gen">Generation: "gemini_video_analysis"</span> <span class="meta">(tokens, cost)</span>
+│   ├── <span class="span-label">Span:</span> "chunk_1" → <span class="gen">Generation: "gemini_video_analysis"</span>
+│   └── ...
+├── <span class="span-label">Span:</span> "merge" <span class="meta">(deterministic: offset + dedup + sanitize)</span>
+├── <span class="span-label">Span:</span> "combine" <span class="meta">(multi-duration only)</span>
+├── <span class="span-label">Span:</span> "summary_generation" → <span class="gen">Generation: "gemini_summary"</span>
+├── <span class="span-label">Span:</span> "semantic_indexing" → <span class="gen">Generation: "gemini_embedding"</span>
+└── <span class="span-label">Span:</span> "face_indexing" <span class="meta">(parallel, fire-and-forget)</span></div>
+</div>
+
+<h3>Dashboards & Alerts</h3>
+<div class="card">
+<table>
+<thead><tr><th>Dashboard</th><th>Audience</th><th>Cadence</th><th>Key Panels</th></tr></thead>
+<tbody>
+<tr><td>System Health</td><td>On-call engineer</td><td>Daily</td><td>Volume, errors, latency, cost</td></tr>
+<tr><td>Model Quality</td><td>DS + PM</td><td>Weekly</td><td>Human flag rates, confidence trends, template comparison</td></tr>
+<tr><td>Eval Results</td><td>DS (ship gate)</td><td>Per eval run</td><td>Metrics vs baseline, pass/fail gates, regressions</td></tr>
+<tr><td>Component Diagnostics</td><td>Engineers</td><td>On-demand</td><td>Per-stage metrics, merge stats, token usage</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3>Implementation Phases</h3>
+<div class="card">
+  <div class="timeline">
+    <div class="phase-block" style="background: #ecfdf5;">
+      <strong>Phase 1</strong>
+      Wk 1–2<br>
+      Instrument SDK
+    </div>
+    <div class="phase-block" style="background: #f0f9ff;">
+      <strong>Phase 2</strong>
+      Wk 3<br>
+      Health dashboard
+    </div>
+    <div class="phase-block" style="background: #fef3c7;">
+      <strong>Phase 3</strong>
+      Wk 4<br>
+      Human scores
+    </div>
+    <div class="phase-block" style="background: #ede9fe;">
+      <strong>Phase 4</strong>
+      Month 3+<br>
+      Eval pipeline
+    </div>
+    <div class="phase-block" style="background: #fce7f3;">
+      <strong>Phase 5–6</strong>
+      Month 4+<br>
+      Dashboards + prompts
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<h2>6. Metrics at a Glance</h2>
+
+<div class="card matrix-scroll">
+<table>
+<thead><tr><th>Metric</th><th>Dimension</th><th>Target (lower CI)</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td>Detection recall (P0: fighting, bullying)</td><td>Per venue_type</td><td>≥ 0.90</td><td><span class="status-badge tbd">TBD</span></td></tr>
+<tr><td>Detection recall (P1: cheating, phone, etc.)</td><td>Per venue_type</td><td>≥ 0.80</td><td><span class="status-badge tbd">TBD</span></td></tr>
+<tr><td>Detection precision (P0)</td><td>Per venue_type</td><td>≥ 0.75</td><td><span class="status-badge tbd">TBD</span></td></tr>
+<tr><td>Detection precision (P1)</td><td>Per venue_type</td><td>≥ 0.80</td><td><span class="status-badge tbd">TBD</span></td></tr>
+<tr><td>Classification accuracy</td><td>Per venue_type</td><td>≥ 0.85</td><td><span class="status-badge tbd">TBD</span></td></tr>
+<tr><td>Temporal IoU</td><td>Per venue_type</td><td>mean ≥ 0.60</td><td><span class="status-badge tbd">TBD</span></td></tr>
+<tr><td>FP rate on negatives</td><td>Per venue_type</td><td>≤ 0.05</td><td><span class="status-badge tbd">TBD</span></td></tr>
+<tr><td>Fairness disparity ratio</td><td>Per axis × venue</td><td>≥ 0.80 (P0: ≥ 0.85)</td><td><span class="status-badge tbd">TBD</span></td></tr>
+<tr><td>D-FINE mAP@0.5</td><td>Overall</td><td>≥ 0.85</td><td><span class="status-badge tbd">TBD</span></td></tr>
+<tr><td>InsightFace TAR@FAR=0.01</td><td>Overall</td><td>≥ 0.90</td><td><span class="status-badge tbd">TBD</span></td></tr>
+<tr><td>Merge completeness</td><td>Overall</td><td>1.00</td><td><span class="status-badge exists">Unit tested</span></td></tr>
+<tr><td>Schema parse success</td><td>Per venue_type</td><td>≥ 0.99</td><td><span class="status-badge exists">Monitored (logs)</span></td></tr>
+<tr><td>Adversarial pass rate</td><td>Per sub-segment</td><td>≥ 0.95</td><td><span class="status-badge planned">Planned</span></td></tr>
+<tr><td>Consistency (N=3 runs)</td><td>Per venue_type</td><td>≥ 0.85</td><td><span class="status-badge tbd">TBD</span></td></tr>
+<tr><td>Search Recall@10 (behaviour queries)</td><td>Per venue × query category</td><td>≥ 0.85</td><td><span class="status-badge planned">Planned</span></td></tr>
+<tr><td>Search MRR@10</td><td>Per venue × query category</td><td>≥ 0.60</td><td><span class="status-badge planned">Planned</span></td></tr>
+<tr><td>Rewrite ablation delta (Recall@10)</td><td>Per query category</td><td>≥ 0 (lower CI)</td><td><span class="status-badge planned">Planned</span></td></tr>
+</tbody>
+</table>
+</div>
+
+<div style="margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--border); font-size: 0.78rem; color: var(--text-muted); text-align: center;">
+  <p style="margin-bottom: 0.5rem;">Companion documents:
+    <em>1. Codebase Architecture Overview</em> ·
+    <em>2. LLM In-Out Flow</em> ·
+    <em>3. eval-plan-full</em> ·
+    <em>4. golden-dataset-spec</em> ·
+    <em>5. langfuse-setup</em>
+  </p>
+  SmartCampus Eval & Observability Design · Updated Jul 7, 2026 (Draft 1.2) · For internal review
+</div>
+
+</body>
+</html>
