@@ -123,6 +123,24 @@
   .eval-layer.l1 { background: #f0f9ff; border: 2px solid #38bdf8; }
   .eval-layer h4 { margin-bottom: 0.5rem; }
 
+  /* Harness modes */
+  .harness-modes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin: 0.5rem 0 1rem; }
+  .harness-mode { border-radius: var(--radius); padding: 1rem; font-size: 0.8rem; border: 1.5px solid var(--border-strong); background: var(--surface-alt); }
+  .harness-mode h5 { font-size: 0.9rem; margin-bottom: 0.3rem; color: var(--primary); }
+  .harness-mode .tag { display: inline-block; font-size: 0.68rem; font-weight: 700; padding: 0.1rem 0.5rem; border-radius: 10px; margin-bottom: 0.45rem; }
+  .tag.gate { background: #d1fae5; color: #065f46; }
+  .tag.diag { background: #dbeafe; color: #1d4ed8; }
+  .tag.monitor { background: #fef3c7; color: #92400e; }
+  .division-strip {
+    border-left: 4px solid var(--primary);
+    background: var(--surface-alt);
+    padding: 0.75rem 1rem;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 0.78rem;
+    border-radius: 0 var(--radius) var(--radius) 0;
+    margin-top: 0.75rem;
+  }
+
   /* Dataset viz */
   .dataset-bar { display: flex; border-radius: var(--radius); overflow: hidden; height: 32px; margin: 1rem 0; }
   .dataset-bar .seg { display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 600; color: white; }
@@ -184,6 +202,7 @@
   @media (max-width: 768px) {
     .tier-row { grid-template-columns: 1fr; }
     .eval-layers { grid-template-columns: 1fr; }
+    .harness-modes { grid-template-columns: 1fr; }
     .flow-container { flex-direction: column; }
     body { padding: 1rem; }
   }
@@ -197,7 +216,7 @@
 <body>
 
 <h1>SmartCampus — Eval & Observability Architecture</h1>
-<p class="version">Version: Draft 1.2 — Jul 7, 2026</p>
+<p class="version">Version: Draft 1.3 — Jul 9, 2026</p>
 
 <!-- ═══════════════════════════════════════════════════════════════ -->
 <h2>1. System Architecture</h2>
@@ -290,7 +309,7 @@
   </div>
   <div class="flow-container" style="margin-top: 0.5rem; padding-left: 2rem;">
     <small style="color: var(--text-muted); margin-right: 1rem;">Parallel post-processing:</small>
-    <div class="flow-box llm" style="min-width: 100px;"><strong>Embed</strong>gemini-embedding-2</div>
+    <div class="flow-box det" style="min-width: 100px;"><strong>Embed</strong>gemini-embedding-2</div>
     <span class="flow-arrow">→</span>
     <div class="flow-box proc"><strong>Index</strong>S3 Vectors (clips)</div>
     <span style="margin: 0 1rem; color: var(--text-muted);">|</span>
@@ -401,6 +420,51 @@ L2 drop beyond trigger_threshold?<br>
 &nbsp;&nbsp;&nbsp;&nbsp;├─ Temporal drop → Check merge logic (Stage 2) + chunk timestamps<br>
 &nbsp;&nbsp;&nbsp;&nbsp;└─ Search quality drop → Stage 7 on pinned corpus; if it passes → caption quality (Stage 1)
   </div>
+  <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.6rem;">
+    <strong>Automated:</strong> this tree is encoded in the harness regression router (doc 6D) — a confirmed drop
+    auto-enqueues the mapped Stage-N diagnostic run and writes results to Langfuse before human error analysis begins.
+    The diagnosis and fix remain human work.
+  </p>
+</div>
+
+<h3>Eval Harness &amp; Automation</h3>
+<div class="card">
+  <div class="harness-modes">
+    <div class="harness-mode">
+      <h5>Mode 1 — Golden Layer 2</h5>
+      <span class="tag gate">RELEASE GATE · ground truth</span>
+      <div>Runs <code>golden-v1</code> as a Langfuse Dataset Run through the <em>real</em> pipeline; unified judge runs in the harness; metrics + CIs computed deterministically; gates on lower CI bounds; exits 0/1 for CI. N=3 named runs for consistency.</div>
+    </div>
+    <div class="harness-mode">
+      <h5>Mode 2 — Layer 1 Component</h5>
+      <span class="tag diag">DIAGNOSTICS · ground truth</span>
+      <div>4 automation groups: merge/combine <strong>fixtures</strong> (free, every PR) · <strong>Gemini component</strong> sets (Stage 1/4) · <strong>CV metrics</strong> (D-FINE, InsightFace) · <strong>pinned-corpus retrieval</strong> (Stage 7). Auto-routed by changed paths + Layer 2 regressions.</div>
+    </div>
+    <div class="harness-mode">
+      <h5>Mode 3 — Post-Prod Judge Audit</h5>
+      <span class="tag monitor">MONITORING · no ground truth</span>
+      <div>Judge over <em>sampled</em> production traces (100% of user-flagged — never sampled away). Emits <strong>proxy</strong> scores only (judge_pass_fail, suspected miss/FP) — never <code>eval_*</code> names, never a gate. Drift alert → targeted Mode 1 run.</div>
+    </div>
+  </div>
+
+  <table>
+    <thead><tr><th>Trigger (automatic)</th><th>What runs</th></tr></thead>
+    <tbody>
+      <tr><td>Every PR (CI)</td><td>Merge/combine fixture evals + stages routed by changed paths (stage map)</td></tr>
+      <tr><td>Nightly</td><td>Post-production judge audit over sampled traces</td></tr>
+      <tr><td>Monthly</td><td>Full Layer 2 regression (N=3 runs per item)</td></tr>
+      <tr><td>Layer 2 regression confirmed</td><td>Auto-enqueued Layer 1 diagnostic run (error-analysis routing above)</td></tr>
+      <tr><td>Pre-ship release</td><td>Layer 2 full + adversarial + fairness — gates inform a <strong>human sign-off</strong></td></tr>
+    </tbody>
+  </table>
+
+  <div class="division-strip">Harness = computes metrics &amp; enforces gates (exit 0/1) · Langfuse = stores &amp; visualizes evidence · CI = blocks merge/release</div>
+
+  <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.75rem;">
+    <strong>Automation boundary (doc 6I):</strong> automated — execution, routing, alerting.
+    Permanently human — ground-truth labeling, judge calibration, adversarial case crafting,
+    root-cause diagnosis, ship/no-ship sign-off, dataset composition decisions.
+  </p>
 </div>
 
 <!-- ═══════════════════════════════════════════════════════════════ -->
@@ -495,11 +559,16 @@ L2 drop beyond trigger_threshold?<br>
 <thead><tr><th>Dashboard</th><th>Audience</th><th>Cadence</th><th>Key Panels</th></tr></thead>
 <tbody>
 <tr><td>System Health</td><td>On-call engineer</td><td>Daily</td><td>Volume, errors, latency, cost</td></tr>
-<tr><td>Model Quality</td><td>DS + PM</td><td>Weekly</td><td>Human flag rates, confidence trends, template comparison</td></tr>
+<tr><td>Model Quality</td><td>DS + PM</td><td>Weekly</td><td>Human flag rates, proxy judge trends (pass rate, suspected miss/FP), confidence trends, template comparison</td></tr>
 <tr><td>Eval Results</td><td>DS (ship gate)</td><td>Per eval run</td><td>Metrics vs baseline, pass/fail gates, regressions</td></tr>
 <tr><td>Component Diagnostics</td><td>Engineers</td><td>On-demand</td><td>Per-stage metrics, merge stats, token usage</td></tr>
 </tbody>
 </table>
+<p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;">
+  <strong>Alert categories:</strong> system down · chunk failure spike · latency spike · quality drop (human flags) ·
+  hallucination signal · cost anomaly · distribution shift · schema parse failure ·
+  <strong>proxy judge drift</strong> (→ triggers targeted Layer 2 golden eval, doc 6E).
+</p>
 </div>
 
 <h3>Implementation Phases</h3>
@@ -554,6 +623,7 @@ L2 drop beyond trigger_threshold?<br>
 <tr><td>Schema parse success</td><td>Per venue_type</td><td>≥ 0.99</td><td><span class="status-badge exists">Monitored (logs)</span></td></tr>
 <tr><td>Adversarial pass rate</td><td>Per sub-segment</td><td>≥ 0.95</td><td><span class="status-badge planned">Planned</span></td></tr>
 <tr><td>Consistency (N=3 runs)</td><td>Per venue_type</td><td>≥ 0.85</td><td><span class="status-badge tbd">TBD</span></td></tr>
+<tr><td>Proxy judge pass rate (sampled production traces)</td><td>Per venue_type</td><td>Monitoring only — no gate</td><td><span class="status-badge planned">Planned</span></td></tr>
 <tr><td>Search Recall@10 (behaviour queries)</td><td>Per venue × query category</td><td>≥ 0.85</td><td><span class="status-badge planned">Planned</span></td></tr>
 <tr><td>Search MRR@10</td><td>Per venue × query category</td><td>≥ 0.60</td><td><span class="status-badge planned">Planned</span></td></tr>
 <tr><td>Rewrite ablation delta (Recall@10)</td><td>Per query category</td><td>≥ 0 (lower CI)</td><td><span class="status-badge planned">Planned</span></td></tr>
@@ -567,9 +637,10 @@ L2 drop beyond trigger_threshold?<br>
     <em>2. LLM In-Out Flow</em> ·
     <em>3. eval-plan-full</em> ·
     <em>4. golden-dataset-spec</em> ·
-    <em>5. langfuse-setup</em>
+    <em>5. langfuse-setup</em> ·
+    <em>6. eval-harness</em>
   </p>
-  SmartCampus Eval & Observability Design · Updated Jul 7, 2026 (Draft 1.2) · For internal review
+  SmartCampus Eval & Observability Design · Updated Jul 9, 2026 (Draft 1.3) · For internal review
 </div>
 
 </body>

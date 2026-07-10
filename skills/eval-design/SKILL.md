@@ -4,15 +4,17 @@ description: >-
   Produce a complete eval and observability design for an AI/LLM system by
   exploring its codebase: a two-layer eval plan (end-to-end + component,
   LLM-as-judge, safety/robustness/fairness tracks, statistical rigor), a golden
-  dataset spec, a Langfuse observability setup, and a stakeholder-facing HTML
-  architecture overview. Use when the user asks to design evals, an evaluation
-  strategy or benchmark, a golden dataset, LLM observability or tracing, or
-  Langfuse instrumentation for a project.
+  dataset spec, a Langfuse observability setup, an eval harness spec (runner,
+  automation/routing, CI gates, post-production judge audits), and a
+  stakeholder-facing HTML architecture overview. Use when the user asks to
+  design evals, an evaluation strategy or benchmark, a golden dataset, an eval
+  harness or eval automation, LLM observability or tracing, or Langfuse
+  instrumentation for a project.
 ---
 
 # Eval & Observability Design from Codebase
 
-Invoke from the root of a project codebase. The deliverables are five markdown documents plus a visual HTML summary page (see Output files below).
+Invoke from the root of a project codebase. The deliverables are six markdown documents plus a visual HTML summary page (see Output files below).
 
 ## Workflow
 
@@ -25,11 +27,12 @@ Copy this checklist and track progress:
 - [ ] Step 3: Eval plan → read references/eval-plan.md
 - [ ] Step 4: Golden dataset spec → read references/golden-dataset.md
 - [ ] Step 5: Langfuse setup → read references/langfuse-setup.md
-- [ ] Step 6: Architecture & roadmap HTML → read references/html-overview.md
-- [ ] Step 7: Self-verification — fix every failure before finishing
+- [ ] Step 6: Eval harness spec → read references/eval-harness.md
+- [ ] Step 7: Architecture & roadmap HTML → read references/html-overview.md
+- [ ] Step 8: Self-verification — fix every failure before finishing
 ```
 
-Steps 1, 2, and 7 are defined in this file. Read each reference file when you reach its step — they carry the full section-by-section requirements.
+Steps 1, 2, and 8 are defined in this file. Read each reference file when you reach its step — they carry the full section-by-section requirements.
 
 ---
 
@@ -118,14 +121,15 @@ From the architecture, determine the following. Each property may resolve to **"
 
 ---
 
-## Steps 3–6: Generate the deliverables
+## Steps 3–7: Generate the deliverables
 
 Read each reference file at its step and follow it fully:
 
 - **Step 3 — Eval plan** → [references/eval-plan.md](references/eval-plan.md): layer overview, Layer 2 end-to-end metrics + LLM-as-judge suite, Layer 1 per-stage component eval, error-analysis flow, cadence, ownership, safety/robustness/fairness tracks, statistical rigor.
-- **Step 4 — Golden dataset spec** → [references/golden-dataset.md](references/golden-dataset.md): scope, composition (goal-driven segment split), sources, edge cases, annotation schema, matching logic, metrics, acceptance criteria, phased rollout, adversarial & fairness segment.
+- **Step 4 — Golden dataset spec** → [references/golden-dataset.md](references/golden-dataset.md): scope, composition (goal-driven segment split), sources, edge cases, annotation schema, matching logic, metrics, acceptance criteria, phased rollout, adversarial & fairness segment, annotation process & tooling.
 - **Step 5 — Langfuse setup** → [references/langfuse-setup.md](references/langfuse-setup.md): concept mapping, trace structure, metadata, scores, dashboards, alerts, integration points, misconceptions, phases, full worked trace example.
-- **Step 6 — HTML overview** → [references/html-overview.md](references/html-overview.md): derive the visual theme from the project's frontend, then build a single self-contained HTML summary page.
+- **Step 6 — Eval harness spec** → [references/eval-harness.md](references/eval-harness.md): the executable counterpart to docs 3–5 — three harness modes (golden Layer 2, Layer 1 component with automation groups + trigger routing, post-production judge audit), Langfuse dataset/run configuration, judge execution, gates & CI, automation boundary, repo layout.
+- **Step 7 — HTML overview** → [references/html-overview.md](references/html-overview.md): derive the visual theme from the project's frontend, then build a single self-contained HTML summary page.
 
 ## Output files
 
@@ -136,9 +140,10 @@ The skill produces these files in a `Knowledge/` folder (or equivalent docs loca
 | `1. Codebase Architecture Overview.md` | Step 1 | System purpose, tier diagram, repo structure, subsystems, infra, recent activity |
 | `2. LLM In-Out Flow.md` | Step 1 | Per-model I/O contracts, prompt construction, schemas, storage layout, pipeline modes |
 | `3. eval-plan-full.md` | Step 3 | Layer 1 + Layer 2 eval plan with error analysis flow |
-| `4. golden-dataset-spec.md` | Step 4 | Dataset composition, annotation schema, metrics, rollout |
+| `4. golden-dataset-spec.md` | Step 4 | Dataset composition, annotation schema + process/tooling, metrics, rollout |
 | `5. langfuse-setup.md` | Step 5 | Trace structure, metadata, scores, dashboards, alerts, integration |
-| `architecture-eval-overview.html` | Step 6 | Visual summary page for review and stakeholder communication |
+| `6. eval-harness.md` | Step 6 | Harness modes, Layer 1 automation groups + routing, Langfuse run config, gates & CI, automation boundary |
+| `architecture-eval-overview.html` | Step 7 | Visual summary page for review and stakeholder communication |
 
 **Document header convention:** every generated markdown document opens with a title (`#`) followed by a version/date line in this exact form:
 
@@ -152,25 +157,29 @@ Use the same header on the HTML page (title + version/date visible near the top)
 
 ---
 
-## Step 7: Self-verification
+## Step 8: Self-verification
 
-Before finishing, audit all six deliverables against this checklist. Fix every failure — do not report the task complete with open failures.
+Before finishing, audit all seven deliverables against this checklist. Fix every failure — do not report the task complete with open failures.
 
-### 7A. Completeness
+### 8A. Completeness
 
 - [ ] Every mandatory section, table, and table row required by the reference files is present in each document, or explicitly marked **"N/A — [reason]"**. Silent omission is a failure.
 - [ ] Every LLM-as-judge evaluator has a rubric per the rules in references/eval-plan.md (at least the gate-critical judges fully worked with an example at each score level; the rest at minimum stubbed and flagged).
-- [ ] The header convention appears on all six deliverables with today's date.
+- [ ] The header convention appears on all seven deliverables with today's date.
 - [ ] Every adaptivity decision (system shape, track applicability, pruned sections) is stated in the document where the pruned content would have appeared.
+- [ ] The harness doc (6) contains all three modes (or an explicit "N/A — [reason]" for a pruned mode) and the automation-boundary section (6I) with all three tiers populated.
 
-### 7B. Cross-document consistency
+### 8B. Cross-document consistency
 
 - [ ] Any number that appears in more than one deliverable — dataset sizes, adversarial counts, metric targets and gates, fairness floors, phase timelines — is identical everywhere. Define each shared number in one document and reference it from the others.
 - [ ] The fairness axes listed in the eval plan (3G), the dataset spec's fairness annotation fields (4J), and the Langfuse disparity scores (5D) match exactly — same axes, same levels.
 - [ ] Composition-matrix totals in the dataset spec equal the stated segment proportions and grand total.
 - [ ] The pipeline stages in doc 2's data-flow diagram match one-for-one the Layer 1 stages (3C) and the Langfuse spans (5B); thresholds/config values quoted in doc 2 match those referenced by the eval plan and dataset spec; the prompt placeholders in doc 2 agree with the adversarial track (3G) on what is author-controlled vs end-user-controlled.
+- [ ] Every Layer 1 stage (3C) appears in exactly one harness automation group (6D), and the harness regression-router table matches the 3D error-analysis branches one-for-one.
+- [ ] Every score name the harness writes (6C/6E/6G) exists in the Langfuse score registry (5D), including Mode 3 proxy scores; `eval_*`/`ground_truth_*` names appear only in ground-truth modes; one canonical name per dimension — no synonyms across docs 3, 5, 6.
+- [ ] The eval-plan cadence table (3E) and the harness triggers (6D routing, 6E schedule/escalation) agree, and the 5G alert table contains the proxy-drift alert that 6E escalates from.
 
-### 7C. Internal correctness
+### 8C. Internal correctness
 
 - [ ] Worked examples are arithmetically and logically self-consistent: counts, timestamps, gap/merge decisions, token totals, and score values must all reconcile with each other.
 - [ ] No confidence interval is attached to a single-item or per-trace score. CIs belong to aggregate metrics over an eval set (see eval-plan 3H); per-trace Langfuse scores are point values.
@@ -194,3 +203,5 @@ Before finishing, audit all six deliverables against this checklist. Fix every f
 12. **No point estimates without intervals.** Every aggregate metric carries a 95% CI. Ship/no-ship decisions use the confidence bound, not the point estimate.
 13. **No regressions declared inside the noise band.** Non-deterministic models have run-to-run variance. Establish the noise band empirically (3H); only trigger error analysis when the drop exceeds it.
 14. **Every eval run is reproducible.** Record dataset version, prompt/template version, and model version + config with every run; comparisons are valid only between runs that differ in exactly one of these.
+15. **The harness runs the eval; Langfuse stores the evidence.** The harness calls the same production code paths, executes any multimodal judge, computes aggregates, and enforces gates via exit codes that CI blocks on. Langfuse is the record and comparison UI — it never executes a video/audio judge and never enforces a gate.
+16. **Automate execution, routing, and alerting — never labeling, calibration, or judgment.** Ground-truth creation, judge calibration against humans, adversarial crafting, root-cause diagnosis, and ship sign-off are permanently human; without ground truth, judge scores are proxy signals and must not borrow ground-truth metric names.

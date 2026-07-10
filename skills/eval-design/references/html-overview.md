@@ -1,8 +1,8 @@
-# Step 6: Generate architecture & roadmap HTML page
+# Step 7: Generate architecture & roadmap HTML page
 
 Produce `architecture-eval-overview.html` — a single self-contained visual summary page.
 
-## 6.0 Derive the visual theme from the project's frontend
+## 7.0 Derive the visual theme from the project's frontend
 
 Before styling anything, **inspect the project for an existing frontend UI and adopt its visual language** so the deliverable looks like it belongs to the product — not a generic template. This is a required discovery step.
 
@@ -54,6 +54,7 @@ Before styling anything, **inspect the project for an existing frontend UI and a
    - Layer 2: End-to-end (shipping gate)
    - Layer 1: Component diagnostics
    - How they connect (error analysis flow)
+   - Harness & automation strip (from doc 6): the three harness modes and what runs automatically per PR / scheduled / pre-ship, with the "harness enforces gates, Langfuse stores evidence, CI blocks" division of labor
 
 4. **Golden dataset plan** — visual of:
    - Segment split (use the proportions chosen in Step 4B for this system's goal — not a fixed 20/20/60). If the adversarial/fairness track applies, include the adversarial segment as an additional slice in the visual, with the counts from the dataset spec's 4J table (the single source of truth for those numbers).
@@ -76,7 +77,7 @@ Before styling anything, **inspect the project for an existing frontend UI and a
 ## Design requirements
 
 - Single self-contained HTML file (inline CSS, inline JS if needed)
-- **Use the theme palette derived in Step 6.0** (project frontend colors/fonts) throughout; the color names in the sections below are roles, filled by that palette when a frontend exists
+- **Use the theme palette derived in Step 7.0** (project frontend colors/fonts) throughout; the color names in the sections below are roles, filled by that palette when a frontend exists
 - Reflect the system shape from Step 1: omit tiers/stages/scenario visuals that don't exist (e.g. no Frontend tier for a backend-only service, no scenario matrix for a uniform system, collapsed pipeline for a single-stage system)
 - Clean, professional look — suitable for presenting to stakeholders
 - Use diagrams (CSS/SVG-based — no external dependencies)
@@ -89,7 +90,7 @@ Before styling anything, **inspect the project for an existing frontend UI and a
 
 ## Visual style for architecture diagrams
 
-> The specific colors named below (green/yellow/blue/gold, pastels) are **roles**. When a frontend theme was derived in Step 6.0, map these roles onto the project's palette (e.g. primary → backend tier, accent → LLM stages) while keeping each role visually distinct. Use the literal defaults only for backend-only projects with no frontend.
+> The specific colors named below (green/yellow/blue/gold, pastels) are **roles**. When a frontend theme was derived in Step 7.0, map these roles onto the project's palette (e.g. primary → backend tier, accent → LLM stages) while keeping each role visually distinct. Use the literal defaults only for backend-only projects with no frontend.
 
 The architecture section should use a **tiered table layout** (not a vertical flowchart with arrows between tiers):
 
@@ -99,7 +100,7 @@ The architecture section should use a **tiered table layout** (not a vertical fl
 
 ## Visual style for trace structure
 
-> The warm-peach/rust palette below is the **backend-only default**. When a frontend theme exists (Step 6.0), recolor this block using the project's accent and surface colors — keep the thick left accent border + subtle surface fill + monospace tree, but in the product's own hues.
+> The warm-peach/rust palette below is the **backend-only default**. When a frontend theme exists (Step 7.0), recolor this block using the project's accent and surface colors — keep the thick left accent border + subtle surface fill + monospace tree, but in the product's own hues.
 
 The Langfuse trace structure should be rendered as:
 - A block with a thick left border (4px, warm accent color like dark orange/rust)

@@ -75,7 +75,7 @@ One row per model/component: INPUT → OUTPUT, compressed to a single line each.
 
 ---
 
-## Consistency obligations (checked in Step 7)
+## Consistency obligations (checked in Step 8)
 
 - The pipeline stages in doc 2's data-flow diagram must match, one-for-one, the Layer 1 stages in the eval plan (3C) and the spans in the Langfuse trace structure (5B).
 - Thresholds and config values quoted in doc 2 (chunk duration, merge gaps, similarity cutoffs) must match the values the eval plan and dataset spec reference — one source of truth: the code.

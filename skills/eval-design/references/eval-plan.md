@@ -145,18 +145,23 @@ Layer 2 metric observed below trigger_threshold (baseline - 2×noise_band - CI_h
 
 Populate the branches with the actual failure signals of this system's stages (e.g. high FP → hallucination check; high FN → boundary recall check).
 
+End the section with an **automation note**: this decision tree is encoded in the eval harness's regression router (harness doc 6D) — a confirmed Layer 2 regression automatically enqueues the mapped Layer 1 diagnostic run and writes results to Langfuse, so human error analysis starts with the component data already gathered. The diagnosis and fix remain human work.
+
 ## 3E. Eval cadence
 
 | Trigger | What to run | Gate condition |
 |---------|-------------|---------------|
+| Every PR (CI, automatic) | Deterministic fixture stages (harness Group A) + stages routed by changed paths (harness doc 6D stage map) | Fixture stages meet their 3C targets; routed stages meet theirs |
 | Template/prompt change | Layer 2 + isolated LLM eval | New variant lower CI bound ≥ baseline (3H) |
 | Component model update | That component's Layer 1 | — |
 | Config change (chunking, thresholds) | Affected Layer 1 | — |
 | New scenario/venue/domain added | Layer 2 for new scenario | Establish baseline (no gate yet) |
 | Population/distribution shift | Affected component Layer 1 + fairness track (if applicable) | — |
-| Layer 2 metric drop **beyond noise band** | Error analysis → targeted Layer 1 | Must exceed trigger_threshold (3H) |
+| Layer 2 metric drop **beyond noise band** | Error analysis → targeted Layer 1 (auto-enqueued by harness router, doc 6D) | Must exceed trigger_threshold (3H) |
+| Scheduled production audit (when Mode 3 applies) | Post-production judge over sampled traces (harness doc 6E) | No gate — monitoring only; proxy scores, never `eval_*` metrics |
+| Proxy judge drift alert (5G) | Targeted Layer 2 for the affected scenario | Same gates as the Layer 2 metric drop row |
 | Monthly regression | Layer 2 full (N=3 runs for non-determinism) | — |
-| Pre-ship release | Layer 2 full + adversarial suite (if applicable) + fairness track (if applicable) | All gates pass on lower CI bounds |
+| Pre-ship release | Layer 2 full + adversarial suite (if applicable) + fairness track (if applicable) | All gates pass on lower CI bounds — human sign-off required; gates inform, don't replace, the release decision |
 | Model version change (LLM provider update) | Layer 2 full + re-establish noise band (5 runs) | — |
 
 ## 3F. Ownership table

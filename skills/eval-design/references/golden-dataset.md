@@ -1,6 +1,6 @@
 # Step 4: Generate golden dataset spec
 
-Produce a golden dataset spec document (`4. golden-dataset-spec.md`) with sections 4A–4J.
+Produce a golden dataset spec document (`4. golden-dataset-spec.md`) with sections 4A–4K.
 
 **Mandatory-content rule.** Every section below is required unless a Step 1/2 verdict prunes it; pruned sections must say **"N/A — [reason]"** in place, never be silently dropped.
 
@@ -33,7 +33,7 @@ Determine the segment split based on the **goal of the AI system being evaluated
 
 **Matrix:** scenario dimensions × behaviour types × segments → total count. The matrix shape itself depends on the system — a binary detector has fewer cells than a multi-class classifier. **If there are no scenario dimensions** (per Step 1), drop that axis: the matrix reduces to behaviour/category × segments (or difficulty band × segments). Do not add a placeholder scenario axis.
 
-**Arithmetic check:** the matrix cells must sum to the grand total, and the per-segment column sums must match the stated segment proportions (within rounding). Verify before finishing (Step 7).
+**Arithmetic check:** the matrix cells must sum to the grand total, and the per-segment column sums must match the stated segment proportions (within rounding). Verify before finishing (Step 8).
 
 ## 4C. Data sources
 
@@ -167,3 +167,23 @@ When the fairness track applies, add these fields to the annotation schema (4E).
 - Never surface demographic labels in production dashboards, Langfuse traces, or any user-facing interface.
 - Retention: follow the same data-protection schedule as the raw video/media. Delete when the item exits the golden dataset.
 - Consent: fairness-axis annotation requires explicit consent or IRB approval. Reference the consent mechanism in each item's `consent_reference` field.
+
+## 4K. Annotation process & tooling
+
+The schema (4E) says what ground truth looks like; this section says **how it gets created, by whom, and in what tool**. A spec without this section leaves the most labor-intensive step undefined.
+
+**Tooling table.** For each kind of ground truth the eval needs, name the tool:
+
+- **First, check the codebase for an existing in-app annotation/review feature** (annotation routers, verification/review endpoints, label exports). If the product already has one, prefer it for output-shaped ground truth (event timelines, labels, verdicts) — annotators see the same player/timebase the system reports in, and per-annotator records support the 4H double-labeling. Name the actual routes/services found.
+- **Spatial ground truth** (bounding boxes, regions, masks, keypoints — for deterministic CV components) almost always needs an **external annotation tool** (e.g. CVAT, Label Studio): in-app tools rarely support geometry. Specify the export format (COCO or equivalent) and where exports land (object storage + in-repo manifests).
+- **Langfuse is not an annotation tool for creating ground truth.** Its annotation queues let humans *score system outputs* against score configs — no media scrubbing, no geometry. Assign it exactly two roles: LLM-judge calibration (eval-plan 3B) and review of flagged production traces. State this explicitly — it is a common misconception.
+
+**Timebase / granularity rule.** Annotate at the level of the **full input in absolute coordinates** (whole video with absolute timestamps, whole document with global spans) — never per pipeline chunk/segment, because chunking is a config knob under evaluation. Component-level ground truth that must match the system's segmentation (e.g. an isolated per-chunk eval) is **derived mechanically** from the full-input GT using the pipeline's own segmentation code (clip at boundaries, flag boundary-straddling items for human verification). One source of truth; never annotate the same content twice in two timebases. *(Single-stage systems: state "N/A — no segmentation".)*
+
+**AI-assisted pre-labeling guardrails.** If annotators can approve/correct the system's own outputs into ground truth (fast, and many in-app tools support it), the GT risks anchoring to the system under eval. Require: (1) a full-scrub rule — approving system outputs never replaces reviewing the full input for missed events; (2) edge-case, adversarial, and the 4H drift-check sample are annotated **blind** (system output hidden); (3) approved outputs' details (timestamps/spans) are re-verified to the 4H standard, not accepted as-is; (4) record `source: manual | ai_approved` per annotation and compare blind-vs-assisted recall in the quality report — the gap is measured pre-label bias.
+
+**Configuration vs annotation.** Distinguish ground truth from *product configuration that eval results depend on* (e.g. ROI lines/zones, routing rules, thresholds drawn/set by app users). Configuration is not annotated — the spec must say **who freezes it for eval** (typically DS), that it is **versioned with the dataset**, and that changing it invalidates the GT that was created against it.
+
+**Export → dataset conversion.** Name the owner of the conversion script (annotation-tool export → 4E schema → the harness's item format), the stable-ID rule for ground-truth events, and require the conversion to be **hash-stable** (re-running on unchanged annotations is byte-identical), since `dataset_version` is a content hash.
+
+**Roles table.** Annotators (who, what training), senior adjudicator (4H disagreements + boundary verification), DS (taxonomy/spec ownership, slicing + conversion scripts, quality report, frozen configs), privacy officer (fairness partition audit, consent verification — when 4J applies).

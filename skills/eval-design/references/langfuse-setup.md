@@ -75,6 +75,11 @@ Trace: [primary_task_id] (one per [primary task unit])
 | [component_metric] | numeric | Component eval | Specific span | Stage-level quality |
 | fairness_disparity_[axis] | numeric (0–1) | Fairness eval | Trace | Disparity ratio for demographic axis — **one score per axis listed in eval-plan 3G**, all axes covered, names matching |
 | adversarial_pass | numeric (0/1) | Adversarial eval | Trace | Did system behave correctly on adversarial input? (only when adversarial track applies) |
+| judge_pass_fail | numeric (0/1) | Post-prod judge harness | Trace | Proxy overall verdict on a sampled production trace (only when harness Mode 3 applies) |
+| judge_[error]_suspected | numeric (0/1) | Post-prod judge harness | Trace | Proxy error signals (e.g. missed event suspected, false positive suspected) |
+| judge_confidence | numeric (0–1) | Post-prod judge harness | Trace | Judge's self-reported confidence in its proxy verdict |
+
+**Proxy naming rule:** post-production judge scores come from a judge with NO ground truth — they are proxy signals. `eval_*` / `ground_truth_*` names are reserved for golden-dataset runs and must never be written by the post-production audit (harness doc 6E/6G). This registry (5D) is the score-name source of record — the harness doc references it, never defines competing names.
 
 **`human_flag_reason` taxonomy rule:** a categorical score is useless without its categories. The generated document must enumerate the reason values (derived from the system's failure modes, e.g. `not_an_incident`, `wrong_type`, `wrong_time`, `wrong_person`, `duplicate`) and state where the frontend surfaces them. If the app has no reason-capture UI yet, say so and specify the taxonomy as the requirement for that UI.
 
@@ -88,6 +93,9 @@ Source 2: Eval pipeline → golden dataset comparison → scores on traces
 Source 3: Automated checks → proxy metric violations → tags on traces
 Source 4: LLM-as-judge (optional) → narrative quality rating → score on generation
 Source 5: Safety/fairness eval (when applicable) → adversarial_pass + fairness_disparity_[axis] → scores on traces
+Source 6: Post-production judge harness (when Mode 3 applies) → judge_pass_fail + proxy error
+  signals → scores on SAMPLED production traces (no ground truth — see harness doc 6E for
+  the sampling policy; always includes user-flagged traces)
 ```
 
 ## 5F. Dashboards
@@ -100,6 +108,7 @@ Source 5: Safety/fairness eval (when applicable) → adversarial_pass + fairness
 - Human flag rates and reasons, by scenario
 - Trends over time
 - Template comparison
+- Proxy judge quality trend (judge_pass_fail rate, judge-suspected error rates) by scenario — when Mode 3 applies
 
 **Dashboard 3: Eval results** (per eval run)
 - Metrics vs baseline, per scenario
@@ -120,6 +129,7 @@ Source 5: Safety/fairness eval (when applicable) → adversarial_pass + fairness
 | Latency spike | p95 exceeds threshold | Check API/infra status |
 | Quality drop | Human flag rate spikes for a scenario | Trigger targeted eval |
 | Distribution shift | Proxy metrics drift beyond threshold | Run component eval |
+| Proxy judge drift (when Mode 3 applies) | judge_pass_fail rate drops beyond threshold vs rolling baseline for any scenario | Trigger targeted Layer 2 golden eval (harness doc 6E escalation) |
 | Cost anomaly | Daily cost exceeds budget | Check for retry loops, anomalous inputs |
 
 ## 5H. Integration points
@@ -134,9 +144,9 @@ Specify what each team needs to implement:
 
 **DS must:**
 - Configure dashboards and alerts
-- Build eval pipeline (golden dataset → run → write scores back)
+- Build the eval harness (golden dataset → run → write scores back; see doc 6)
 - Define proxy metric thresholds
-- Set up LLM-as-judge evaluators (optional)
+- Run LLM-as-judge in the harness when the judge input includes a non-text modality (video/audio/images) or ground-truth files — Langfuse-managed evaluators handle text-only judges only (harness doc 6G)
 
 ## 5I. Common misconceptions to preempt
 
@@ -146,8 +156,9 @@ Include in the document (for the DS audience):
 3. Not real-time — it's a record for analysis, not a live alert system
 4. Sampling — start 100%, scale down once baselines established (never sample away user complaints)
 5. Prompt management — optional but powerful for template versioning
-6. Datasets feature — built-in offline eval tooling (alternative to custom pipeline)
+6. Datasets feature — built-in dataset/run management the harness uses for golden and component sets; the harness executes the eval, not Langfuse (see doc 6F)
 7. Cost tracking — automatic if generations are instrumented correctly
+8. Langfuse neither runs multimodal judges nor enforces gates — judges that inspect video/audio/images run in the harness; ship gates are computed and enforced by the harness (CI blocks on its exit code). Langfuse stores and visualizes the evidence (harness doc 6G/6H)
 
 ## 5J. Implementation phases
 
@@ -166,7 +177,7 @@ Include ONE concrete, fully populated trace for a realistic instance of the prim
 
 For each span include: time window, inputs, outputs, and the span/generation metadata from 5C. For the LLM generation(s) include model, token counts, and template version. End the example with the scores block (human + eval scores) attached to the trace.
 
-**Internal-consistency requirement (checked in Step 7):** every value in the example must reconcile with every other — event counts before/after each stage, merge/gap decisions against the stated thresholds, timestamp offsets, token totals across generations, and score values against the events shown. Scores in the example are per-trace point values — no CIs (see 5D).
+**Internal-consistency requirement (checked in Step 8):** every value in the example must reconcile with every other — event counts before/after each stage, merge/gap decisions against the stated thresholds, timestamp offsets, token totals across generations, and score values against the events shown. Scores in the example are per-trace point values — no CIs (see 5D).
 
 ```
 Trace: tr_[id]
