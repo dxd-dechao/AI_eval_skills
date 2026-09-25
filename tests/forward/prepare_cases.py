@@ -253,20 +253,11 @@ DEV_MANIFEST = {"id": "dev-set", "version": "1", "items": [{"id": "dev-1", "cont
 HELD_MANIFEST = {"id": "heldout-set", "version": "1", "items": [{"id": "hold-1", "content": "Beta launch note"}]}
 
 PROMPTS = {
-    "A": """Design evaluation for this document-summary application using the eval-design skill, then build a harness with the eval-harness-build skill.
-There is no Product expectations packet. Follow the skills. Write outputs under Knowledge/ and eval_harness/ as the skills require.
-Do not invent approvers, thresholds, or a judge.
-""",
-    "B": """Design evaluation using the eval-design skill, then build a harness with eval-harness-build.
-Product expectations are in Knowledge/product-expectations.json. The rubric is not approved.
-Draft candidate binary criteria and stop before evaluator implementation. The builder must stop too.
-""",
-    "C": """Design evaluation using eval-design, then implement the harness with eval-harness-build.
-Knowledge/ already contains an approved rubric, evaluator routes, and disjoint development and held-out manifests. Do not alter those JSON files.
-Route the mechanical criterion, the named-expert criterion, and the semantic criterion as the register states.
-Generate the package described by the harness skill, defaulting to diagnostic k=1.
-""",
+    "A": "Design an eval for this app and build the harness.\n",
+    "B": "Design an eval for this app and build the harness.\n",
+    "C": "Design an eval for this app and build the harness.\n",
 }
+PLUMBING_PROMPT = "Please add neutral execution plumbing so we can call the app and save local results.\n"
 
 
 def _write(path: Path, text: str) -> None:
@@ -307,6 +298,8 @@ def prepare(root: Path) -> None:
         repo = root / name
         _base_app(repo)
         _write(repo / "PROMPT.md", PROMPTS[key])
+        if key == "A":
+            _write(repo / "PROMPT-PLUMBING.md", PLUMBING_PROMPT)
         manifest = {
             "case": name,
             "prompt": "PROMPT.md",

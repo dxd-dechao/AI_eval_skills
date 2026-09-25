@@ -16,7 +16,7 @@ The target directory must be missing or empty. The command creates three repos:
 | `B-expectations-only` | Application plus expectations JSON. No approved rubric. |
 | `C-approved-criteria` | Approved rubric, three routes, disjoint development and held-out manifests. |
 
-Each repo contains `PROMPT.md` (the user request), `app/` (a document summarizer with an invocation counter), and `INPUT_MANIFEST.json`. Case C also contains `Knowledge/` registers. Synthetic names in case C are fixtures, not real approvals.
+Each repo contains `PROMPT.md` (the user request), `app/` (a document summarizer with an invocation counter), and `INPUT_MANIFEST.json`. Case A also contains `PROMPT-PLUMBING.md` for a follow-up that asks only for neutral execution plumbing. Case C also contains `Knowledge/` registers. Synthetic names in case C are fixtures, not real approvals.
 
 ## Invoke
 

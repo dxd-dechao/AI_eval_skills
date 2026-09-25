@@ -189,7 +189,7 @@ If a cell has fewer samples than the floor, report the metric with its (wide) CI
 ```
 disparity_ratio = min(M across levels of A) / max(M across levels of A)
 ```
-Gate: `disparity_ratio ≥ 0.80` (the worst-performing group achieves ≥ 80% of the best group's score). Tighten for safety-critical systems.
+Gate parameter: `disparity_ratio ≥ <Product-approved minimum>`. The minimum is a Product decision recorded on the criterion's decision consequence and in the decision log. If that value is absent, the fairness gate is blocked. The skill does not supply a number.
 
 **Privacy note:** Demographic labels are sensitive. Store fairness-axis annotations in a separate access-controlled dataset partition. Never include them in production traces or dashboards visible to general users. Access restricted to eval pipeline service accounts and designated DS reviewers.
 
@@ -205,11 +205,12 @@ When the system is safety-critical, not all errors are equal. Define and gate on
 
 **Ship/no-ship rule:** When harm-severity weighting applies, the gate is on the costly-direction metric's lower confidence bound (not point estimate), not on aggregate F1. A system can ship with moderate overall F1 if the costly direction is well-controlled. Conversely, high F1 does NOT clear a system where the costly direction is unacceptably high.
 
-**Worked example:** A school video system where fighting detection is P0-safety:
-- Costly direction: false negative (missed fight)
-- Gate: recall lower 95% CI bound ≥ 0.90 for fighting/bullying
-- Secondary gate: precision lower 95% CI bound ≥ 0.75 (false accusations still matter, but less than missed events)
-- Ship decision uses the CI bound, not the point estimate (see 3H)
+**Illustrative only (not a transferable threshold).** A school video system where fighting detection is treated as safety-critical:
+- Costly direction: false negative (missed fight). This direction is a candidate until Product records it.
+- Gate parameter: recall lower 95% CI bound ≥ `<Product-approved value for this behaviour>`. No number belongs in the skill.
+- Secondary parameter: precision lower 95% CI bound ≥ `<Product-approved value>`. No number belongs in the skill.
+- If either value is absent, that gate is blocked.
+- A ship decision uses the CI bound, not the point estimate (see 3H), and only after those values are approved.
 
 ## 3H. Statistical rigor
 

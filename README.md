@@ -20,7 +20,7 @@ Factual architecture documents (when code is explored):
 |---|-------------|-------------|
 | 1 | **Codebase Architecture Overview** | System purpose, service tiers, repo structure, subsystems, recent activity |
 | 2 | **LLM In-Out Flow** | Per-model prompt/schema contracts, data-flow diagrams, inference config |
-| 3 | **Eval Plan** | Two-layer eval: end-to-end shipping gate (Layer 2) + per-component diagnostics (Layer 1), with LLM-as-judge rubrics, safety/robustness/fairness tracks, and statistical rigor |
+| 3 | **Eval Plan** | Two-layer eval: end-to-end shipping gate (Layer 2) + per-component diagnostics (Layer 1), with per-criterion routing, safety/robustness/fairness tracks, and statistical rigor |
 | 4 | **Golden Dataset Spec** | Goal-driven composition, annotation schema, matching logic, acceptance criteria, phased rollout |
 | 5 | **Langfuse Setup Spec** | Trace structure, metadata, scores, dashboards, alerts, integration points |
 | 6 | **Eval Harness Spec** | Harness modes, automation groups, module architecture, Langfuse integration, gate semantics |
