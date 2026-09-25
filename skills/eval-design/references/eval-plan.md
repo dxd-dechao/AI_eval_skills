@@ -38,9 +38,11 @@ Layer 2 reports the Product outcome. Each approved criterion is binary (`Pass` /
 
 Do not start from a standard LLM-judge suite. Route each approved criterion with the table in [product-expectations.md](product-expectations.md):
 
-- mechanically computable → deterministic evaluator
-- interpretation, evolving boundaries, or named accountability → named human
-- stable repeatable semantic judgment → optional LLM, after separate acceptance
+- fully specified and machine-observable → `deterministic`
+- interpretive, evolving, rare, or requiring named accountability → `human` (named expert)
+- interpretive, stable and repeated at scale → optional `llm`, only after fresh held-out human validation and evaluator acceptance
+
+A rare criterion stays with the named expert even when its judgment is stable. Choosing `llm` requires a stated volume reason in `measurement_rationale`.
 
 An ordinal measure appears only when that product's approved contract defines an ordinal scale. It does not replace the binary decision criterion and it is not a default.
 

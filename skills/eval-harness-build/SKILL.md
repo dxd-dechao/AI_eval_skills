@@ -55,7 +55,7 @@ Find how production starts one unit of work. The adapter imports or calls that e
 
 ## Step 3: Modules
 
-Read [references/modules.md](references/modules.md) and generate the package it specifies. Conventional modules for contract validation and routing live in the consuming project, not in this skill repository.
+Read [references/modules.md](references/modules.md) and generate the package it specifies, including the top-level `Summary` aggregates and the per-route acceptance-evidence minimums. Conventional modules for contract validation and routing live in the consuming project, not in this skill repository.
 
 ## Step 4: Notebook
 

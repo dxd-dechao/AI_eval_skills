@@ -134,9 +134,11 @@ After a rubric version is approved, route **each** criterion on its own. Record 
 
 | Condition | Route | Acceptance evidence |
 |-----------|-------|---------------------|
-| Mechanically computable from known fields | `deterministic` | Known-good, known-bad, and shortcut/edge cases tied to the implementation version |
-| Interpretation, evolving boundaries, or named accountability | `human` | Named reviewer or resolvable reviewer ID, accepted procedure/rubric version, attributable item-level review. Pending stays pending |
-| Stable, repeatable semantic judgment suitable for automation | `llm` | Fresh held-out expert labels, agreement/error and stability checks fit to that label regime, run-health checks, inspectable rationales, and a scoped acceptance decision |
+| Fully specified and machine-observable | `deterministic` | Known-good, known-bad, and shortcut/edge cases tied to the implementation version |
+| Interpretive, evolving, rare, or requiring named accountability | `human` (named expert) | Named reviewer or resolvable reviewer ID, accepted procedure/rubric version, attributable item-level review. Pending stays pending |
+| Interpretive, stable and repeated at scale | optional `llm` | Fresh held-out expert labels, agreement/error and stability checks fit to that label regime, run-health checks, inspectable rationales, and a scoped acceptance decision. Only after fresh held-out human validation and evaluator acceptance |
+
+A rare criterion stays with the named expert even when its judgment is stable. Choosing `llm` requires a stated volume reason in `measurement_rationale`.
 
 ```json
 {

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create three temporary repos for product-first skill forward checks."""
+"""Create temporary repos for product-first skill forward checks."""
 
 from __future__ import annotations
 
@@ -252,10 +252,144 @@ ROUTES = {
 DEV_MANIFEST = {"id": "dev-set", "version": "1", "items": [{"id": "dev-1", "content": "Alpha budget note"}]}
 HELD_MANIFEST = {"id": "heldout-set", "version": "1", "items": [{"id": "hold-1", "content": "Beta launch note"}]}
 
+D_EXPECTATIONS = {
+    "schema_version": "product-eval-contract/1",
+    "artifact": "product-expectations",
+    "state": "EVALUATOR_ROUTING",
+    "display_state": "Rubric approved — evaluator acceptance separate",
+    "inventory": [
+        {
+            "id": "mode-summary",
+            "version": "observed-1",
+            "mode": "summarize",
+            "output": "headline, bullet_count, char_count, mentions_total",
+            "source": "app/summarize.py:summarize",
+        }
+    ],
+    "applicability_map": [
+        {
+            "id": "app-hold",
+            "output": "headline",
+            "candidate_behaviour": "Headline for a legal-hold notice keeps the hold's scope",
+            "product_story": "A legal-hold notice is a rare document type",
+            "precondition": "Document type is legal-hold notice",
+            "status": "in_scope",
+        },
+        {
+            "id": "app-claim",
+            "output": "headline",
+            "candidate_behaviour": "Headline does not add a claim the document does not contain",
+            "product_story": "Every summary is checked",
+            "precondition": "Any non-empty document",
+            "status": "in_scope",
+        },
+    ],
+    "story_packet": [
+        {
+            "id": "story-hold",
+            "source": "fixture expectations",
+            "scenario": "Legal-hold notices only. This document type is rare: a handful of items per quarter. Experts already mark this judgment consistently.",
+            "judgment_unit": "The headline of a legal-hold notice",
+            "named_expert": "fixture-expert",
+            "exclusions": ["Do not score writing style"],
+            "open_decisions": [],
+        },
+        {
+            "id": "story-claim",
+            "source": "fixture expectations",
+            "scenario": "Every summary. Volume is thousands of summaries per day. Experts already mark this judgment consistently.",
+            "judgment_unit": "The headline versus the source document",
+            "named_expert": "fixture-expert",
+            "exclusions": ["Do not score writing style"],
+            "open_decisions": [],
+        },
+    ],
+    "decision_log": [
+        {
+            "id": "dec-style",
+            "question": "Is writing style in scope?",
+            "holder": "fixture-pm",
+            "decision": "No. Style is excluded.",
+            "status": "decided",
+            "source": "fixture expectations",
+        }
+    ],
+    "observed_facts": [
+        {
+            "id": "fact-hold-volume",
+            "statement": "Legal-hold notices occur a handful of times per quarter.",
+            "source": "fixture expectations",
+            "kind": "observed",
+        },
+        {
+            "id": "fact-summary-volume",
+            "statement": "Summaries occur at thousands per day.",
+            "source": "fixture expectations",
+            "kind": "observed",
+        },
+        {
+            "id": "fact-expert-agreement",
+            "statement": "Experts already mark both judgments consistently.",
+            "source": "fixture expectations",
+            "kind": "observed",
+        },
+    ],
+}
+
+D_RUBRIC = {
+    "schema_version": "product-eval-contract/1",
+    "artifact": "rubric-register",
+    "state": "EVALUATOR_ROUTING",
+    "criteria": [
+        {
+            "id": "C-hold",
+            "version": "1.0",
+            "source_expectation_id": "story-hold",
+            "applicable_unit": "headline of a legal-hold notice",
+            "preconditions": "document type is legal-hold notice",
+            "judgment": "The headline preserves the scope of the legal hold",
+            "pass_rule": "hold scope is preserved",
+            "fail_rule": "headline drops or widens the hold scope",
+            "unscorable_rule": "document is not a legal-hold notice, or headline is missing",
+            "required_evidence": "legal-hold notice text and headline",
+            "decision_consequence": {"proposal": "required for ship", "status": "approved"},
+            "approval_state": "approved",
+        },
+        {
+            "id": "C-claim",
+            "version": "1.0",
+            "source_expectation_id": "story-claim",
+            "applicable_unit": "headline versus document",
+            "preconditions": "both strings present",
+            "judgment": "Headline does not introduce a claim absent from the document",
+            "pass_rule": "no unsupported claim",
+            "fail_rule": "headline adds a claim the document does not contain",
+            "unscorable_rule": "either string missing",
+            "required_evidence": "document text and headline",
+            "decision_consequence": {"proposal": "required for ship", "status": "approved"},
+            "approval_state": "approved",
+        },
+    ],
+    "review": {
+        "product_domain_approver": "fixture-pm",
+        "named_expert": "fixture-expert",
+        "reviewed_examples": ["dev-1", "dev-2"],
+        "boundary_cases": ["non-hold documents are unscorable for C-hold"],
+        "development_dataset": {"id": "dev-set", "version": "1"},
+        "disagreements": [],
+        "resolution": "Experts already mark both judgments consistently.",
+        "unresolved_questions": [],
+        "approval_state": "approved",
+        "approved_version": "1.0",
+        "approved_date": "2026-09-25",
+    },
+}
+
 PROMPTS = {
     "A": "Design an eval for this app and build the harness.\n",
     "B": "Design an eval for this app and build the harness.\n",
     "C": "Design an eval for this app and build the harness.\n",
+    "D": "Design an eval for this app and build the harness.\n",
 }
 PLUMBING_PROMPT = "Please add neutral execution plumbing so we can call the app and save local results.\n"
 
@@ -293,6 +427,7 @@ def prepare(root: Path) -> None:
         "A-missing-expectations": ("A", False, False),
         "B-expectations-only": ("B", True, False),
         "C-approved-criteria": ("C", True, True),
+        "D-approved-unrouted": ("D", True, True),
     }
     for name, (key, expectations, approved) in specs.items():
         repo = root / name
@@ -304,9 +439,16 @@ def prepare(root: Path) -> None:
             "case": name,
             "prompt": "PROMPT.md",
             "entrypoint": "app.summarize.summarize",
-            "expects_registers": approved,
+            "expects_registers": approved and key != "D",
         }
-        if expectations:
+        if key == "D":
+            _write(repo / "Knowledge" / "product-expectations.json", json.dumps(D_EXPECTATIONS, indent=2) + "\n")
+            _write(
+                repo / "Knowledge" / "product-expectations.md",
+                "# Fixture expectations\n\nSee product-expectations.json. Style is out of scope.\n",
+            )
+            _write(repo / "Knowledge" / "rubric-register.json", json.dumps(D_RUBRIC, indent=2) + "\n")
+        elif expectations:
             packet = dict(EXPECTATIONS)
             if not approved:
                 packet["state"] = "RUBRIC_REVIEW"
@@ -318,9 +460,9 @@ def prepare(root: Path) -> None:
                 repo / "Knowledge" / "product-expectations.md",
                 "# Fixture expectations\n\nSee product-expectations.json. Style is out of scope.\n",
             )
-        if not approved and expectations:
+        if key != "D" and not approved and expectations:
             _write(repo / "Knowledge" / "rubric-register.json", json.dumps(RUBRIC_PENDING, indent=2) + "\n")
-        if approved:
+        if key != "D" and approved:
             _write(repo / "Knowledge" / "rubric-register.json", json.dumps(APPROVED_RUBRIC, indent=2) + "\n")
             _write(repo / "Knowledge" / "evaluator-register.json", json.dumps(ROUTES, indent=2) + "\n")
             _write(repo / "Knowledge" / "dev_manifest.json", json.dumps(DEV_MANIFEST, indent=2) + "\n")

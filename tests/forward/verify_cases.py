@@ -264,6 +264,24 @@ def _cli_gate(staged: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(cmd, cwd=staged, capture_output=True, text=True, env=env)
 
 
+def _run_probe(report: Report, case: str, name: str, fn):
+    """Record one probe. An exception fails only this probe."""
+    try:
+        ok, detail = fn()
+    except Exception:
+        tail = "\n".join(traceback.format_exc().strip().splitlines()[-6:])
+        report.add(case, name, False, tail)
+        return None
+    report.add(case, name, bool(ok), "" if detail is None else str(detail))
+    return ok
+
+
+def _summary_attr(summary, name: str):
+    if not hasattr(summary, name):
+        raise AttributeError(f"Summary.{name} is not on the documented top-level aggregate")
+    return getattr(summary, name)
+
+
 def _payload(result) -> dict:
     if hasattr(result, "to_dict"):
         return result.to_dict()
@@ -297,9 +315,9 @@ def _len_evidence() -> dict:
     return {
         "kind": "verification",
         "cases": [
-            {"role": "known-good", "name": "known-good", "expect": "PASS"},
-            {"role": "known-bad", "name": "known-bad", "expect": "FAIL"},
-            {"role": "edge", "name": "edge", "expect": "UNSCORABLE"},
+            {"role": "known-good", "name": "known-good",         "expected": "PASS"},
+            {"role": "known-bad", "name": "known-bad", "expected": "FAIL"},
+            {"role": "edge", "name": "edge", "expected": "UNSCORABLE"},
         ],
         "implementation_version": "app.summarize.summarize",
     }
@@ -320,9 +338,8 @@ def check_c(repo: Path, report: Report) -> None:
     case = "C"
     reg = _load(repo / "Knowledge" / "evaluator-register.json")
     report.add(case, "register-present", reg is not None, "evaluator-register.json")
-    if reg:
-        types = {r.get("evaluator_type") for r in reg.get("routes", [])}
-        report.add(case, "three-routes", types >= {"deterministic", "human", "llm"}, str(types))
+    types = {r.get("evaluator_type") for r in (reg or {}).get("routes", [])} if reg else set()
+    report.add(case, "three-routes", bool(reg) and types >= {"deterministic", "human", "llm"}, str(types))
     dev = _load(repo / "Knowledge" / "dev_manifest.json")
     hold = _load(repo / "Knowledge" / "heldout_manifest.json")
     disjoint, disjoint_detail = _manifests_disjoint(dev, hold)
@@ -345,221 +362,437 @@ def check_c(repo: Path, report: Report) -> None:
         compact = "".join(blob.split())
         report.add(case, "notebook-ast", parsed, err or "parsed")
         report.add(case, "notebook-defaults", "diagnostic" in blob and "LIMIT=1" in compact and "RUNS=1" in compact, "diagnostic limit/runs")
+    else:
+        report.add(case, "notebook-ast", False, "notebook missing")
+        report.add(case, "notebook-defaults", False, "notebook missing")
     try:
         _import_harness(repo)
         from eval_harness.config import HarnessConfig
         from eval_harness.contract import preflight_gate
         from eval_harness.run_eval import run
-    except Exception as exc:
-        report.add(case, "import-harness", False, traceback.format_exc().splitlines()[-1] if False else f"{type(exc).__name__}: {exc}")
-        return
-    report.add(case, "import-harness", True, "imported")
-    cfg = HarnessConfig(
-        mode="diagnostic",
-        limit=1,
-        runs=1,
-        use_langfuse=False,
-        results_dir=str(repo / "results"),
-        expectations_path=str(repo / "Knowledge" / "product-expectations.json"),
-        rubric_path=str(repo / "Knowledge" / "rubric-register.json"),
-        evaluator_register_path=str(repo / "Knowledge" / "evaluator-register.json"),
-        dataset_path=str(repo / "Knowledge" / "dev_manifest.json"),
-    )
-    counter = repo / "app" / "invocation_count"
-    if counter.exists():
-        counter.unlink()
-    try:
-        result = run(cfg, limit=1)
-        payload = result if isinstance(result, dict) else getattr(result, "__dict__", {})
-        if hasattr(result, "to_dict"):
-            payload = result.to_dict()
-        report.add(case, "k1-run", True, "run returned")
-        count = int(counter.read_text()) if counter.exists() else payload.get("invocation_count")
-        report.add(case, "entrypoint-once", count == 1, f"invocation_count={count}")
-        eligible = payload.get("decision_eligible", getattr(result, "decision_eligible", None))
-        verdict = payload.get("release_verdict", getattr(result, "release_verdict", "missing"))
-        report.add(case, "diagnostic-not-release", eligible is False and verdict in (None, "null"), f"eligible={eligible} verdict={verdict}")
-    except Exception as exc:
-        report.add(case, "k1-run", False, f"{type(exc).__name__}: {exc}")
-        report.add(case, "entrypoint-once", False, "run failed")
-        report.add(case, "diagnostic-not-release", False, "run failed")
-    try:
-        import eval_harness.metrics as metrics
+    except Exception:
+        report.add(case, "import-harness", False, "\n".join(traceback.format_exc().strip().splitlines()[-6:]))
+        report.add(case, "k1-run", False, "harness import failed")
+        report.add(case, "entrypoint-once", False, "harness import failed")
+        report.add(case, "diagnostic-not-release", False, "harness import failed")
+    else:
+        report.add(case, "import-harness", True, "imported")
+        cfg = HarnessConfig(
+            mode="diagnostic",
+            limit=1,
+            runs=1,
+            use_langfuse=False,
+            results_dir=str(repo / "results"),
+            expectations_path=str(repo / "Knowledge" / "product-expectations.json"),
+            rubric_path=str(repo / "Knowledge" / "rubric-register.json"),
+            evaluator_register_path=str(repo / "Knowledge" / "evaluator-register.json"),
+            dataset_path=str(repo / "Knowledge" / "dev_manifest.json"),
+        )
+        counter = repo / "app" / "invocation_count"
+        if counter.exists():
+            counter.unlink()
+        try:
+            result = run(cfg, limit=1)
+            payload = result if isinstance(result, dict) else getattr(result, "__dict__", {})
+            if hasattr(result, "to_dict"):
+                payload = result.to_dict()
+            report.add(case, "k1-run", True, "run returned")
+            count = int(counter.read_text()) if counter.exists() else payload.get("invocation_count")
+            report.add(case, "entrypoint-once", count == 1, f"invocation_count={count}")
+            eligible = payload.get("decision_eligible", getattr(result, "decision_eligible", None))
+            verdict = payload.get("release_verdict", getattr(result, "release_verdict", "missing"))
+            report.add(case, "diagnostic-not-release", eligible is False and verdict in (None, "null"), f"eligible={eligible} verdict={verdict}")
+        except Exception:
+            tail = "\n".join(traceback.format_exc().strip().splitlines()[-6:])
+            report.add(case, "k1-run", False, tail)
+            report.add(case, "entrypoint-once", False, "run failed")
+            report.add(case, "diagnostic-not-release", False, "run failed")
+    _check_c_metrics(repo, report, case)
 
-        summarize = metrics.summarize
-        overlap_fn = getattr(metrics, "interval_iou", None) or getattr(metrics, "temporal_overlap", None)
-        proxies = getattr(metrics, "PRODUCTION_PROXIES", None)
-        if proxies is None:
-            proxies = getattr(metrics, "PROXY_SCORE_NAMES", ())
+
+def _check_c_metrics(repo: Path, report: Report, case: str) -> None:
+    """Each probe is isolated. Documented Summary fields only; no private attributes."""
+    box: dict = {}
+
+    def _load_metrics():
+        import eval_harness.metrics as metrics
         from eval_harness.gates import evaluate_decision
         from eval_harness.dataset_loader import assert_held_out_disjoint
         from eval_harness.human_review import import_reviews
         from eval_harness.run_eval import run as run_gate
-        rows = [
-            {"criterion_id": "C-len", "applicability": "applicable", "status": "PASS", "shadow": False},
-            {"criterion_id": "C-tone", "applicability": "applicable", "status": "FAIL", "shadow": False},
-            {"criterion_id": "C-faithful", "applicability": "not_applicable", "status": "PASS", "shadow": False},
-            {"criterion_id": "C-extra", "applicability": "unknown", "status": "PASS", "shadow": False},
-        ]
-        summary = summarize(rows, {"required_criteria": ["C-len"], "unscorable_consequence": "block"})
-        report.add(
-            case,
-            "denominator",
-            summary.denominator == 2 and summary.pass_count == 1 and summary.fail_count == 1 and summary.not_applicable_count == 1 and summary.unscorable_count == 1 and abs((summary.pass_rate or 0) - 0.5) < 1e-9,
-            f"den={summary.denominator} pass={summary.pass_count} fail={summary.fail_count} na={summary.not_applicable_count} uns={summary.unscorable_count} rate={summary.pass_rate}",
+        from eval_harness.contract import preflight_gate
+
+        box.update(
+            metrics=metrics,
+            summarize=metrics.summarize,
+            evaluate_decision=evaluate_decision,
+            assert_held_out_disjoint=assert_held_out_disjoint,
+            import_reviews=import_reviews,
+            run_gate=run_gate,
+            preflight_gate=preflight_gate,
         )
-        empty = summarize([], {"required_criteria": ["C-len"], "unscorable_consequence": "block"})
-        report.add(case, "empty-not-pass", empty.pass_rate is None and empty.denominator == 0, f"rate={empty.pass_rate}")
+        return True, "metrics imported"
+
+    if _run_probe(report, case, "metrics-import", _load_metrics) is not True:
+        pass
+
+    policy_len = {"required_criteria": ["C-len"], "unscorable_consequence": "block"}
+    rows = [
+        {"criterion_id": "C-len", "applicability": "applicable", "status": "PASS", "shadow": False},
+        {"criterion_id": "C-tone", "applicability": "applicable", "status": "FAIL", "shadow": False},
+        {"criterion_id": "C-faithful", "applicability": "not_applicable", "status": "PASS", "shadow": False},
+        {"criterion_id": "C-extra", "applicability": "unknown", "status": "PASS", "shadow": False},
+    ]
+
+    def _denominator():
+        summary = box["summarize"](rows, policy_len)
+        box["summary"] = summary
+        den = _summary_attr(summary, "denominator")
+        passed = _summary_attr(summary, "pass_count")
+        failed = _summary_attr(summary, "fail_count")
+        na = _summary_attr(summary, "not_applicable_count")
+        uns = _summary_attr(summary, "unscorable_count")
+        pending = _summary_attr(summary, "pending_count")
+        errors = _summary_attr(summary, "error_count")
+        rate = _summary_attr(summary, "pass_rate")
+        blocked = _summary_attr(summary, "blocked_reason")
+        shadows = list(_summary_attr(summary, "required_shadow_ids") or [])
+        ok = (
+            den == 2
+            and passed == 1
+            and failed == 1
+            and na == 1
+            and uns == 1
+            and pending == 0
+            and errors == 0
+            and blocked in (None, "")
+            and shadows == []
+            and abs((rate or 0) - 0.5) < 1e-9
+        )
+        return ok, f"den={den} pass={passed} fail={failed} na={na} uns={uns} pending={pending} err={errors} rate={rate} blocked={blocked} shadow={shadows}"
+
+    def _empty():
+        empty = box["summarize"]([], policy_len)
+        rate = _summary_attr(empty, "pass_rate")
+        den = _summary_attr(empty, "denominator")
+        blocked = _summary_attr(empty, "blocked_reason")
+        return rate is None and den == 0 and bool(blocked), f"rate={rate} blocked={blocked}"
+
+    _run_probe(report, case, "denominator", _denominator)
+    _run_probe(report, case, "empty-not-pass", _empty)
+
+    def _stage_ready():
         expectations, rubric, register = _base_registers(repo)
-        dataset = _load(repo / "Knowledge" / "dev_manifest.json") or {"id": "dev-set", "version": "1", "items": [{"id": "dev-1", "content": "Alpha budget note"}]}
-        with tempfile.TemporaryDirectory(prefix="ai-eval-skills-probes-") as tmp:
-            root = Path(tmp)
-            ready_exp, ready_rubric, ready_reg = _accepted_len(expectations, rubric, register)
-            ready = _stage(repo, root / "ready", ready_exp, ready_rubric, ready_reg, dataset)
-            ready_pre = preflight_gate(_config(ready))
-            report.add(case, "accepted-preflight", ready_pre.ok is True, getattr(ready_pre, "blocked_reason", None))
-            passed = run_gate(_config(ready), limit=1)
-            passed_payload = _payload(passed)
-            evidence_kept = "implementation_version" in json.dumps(passed_payload)
-            meta_path = ready / "probe-results" / "run_meta.json"
-            if meta_path.exists():
-                evidence_kept = evidence_kept or "implementation_version" in meta_path.read_text()
-            report.add(
-                case,
-                "accepted-gate-pass",
-                passed_payload.get("exit_code") == 0 and passed_payload.get("release_verdict") == "pass" and evidence_kept,
-                f"exit={passed_payload.get('exit_code')} verdict={passed_payload.get('release_verdict')} evidence={evidence_kept}",
-            )
-            fail_exp, fail_rubric, fail_reg = _accepted_len(expectations, rubric, register)
-            for route in fail_reg.get("routes") or []:
-                if route.get("criterion_id") == "C-tone":
-                    _accept_route(
-                        route,
-                        {
-                            "kind": "human_procedure",
-                            "reviewer_id": "fixture-expert",
-                            "procedure": "compare headline to opening",
-                            "rubric_version": "1.0",
-                            "item_reviews": [
-                                {
-                                    "item_id": "dev-1",
-                                    "reviewer_id": "fixture-expert",
-                                    "verdict": "Pass",
-                                    "evidence_note": "procedure check",
-                                }
-                            ],
-                        },
-                    )
-            fail_reg["decision_policy"] = {"required_criteria": ["C-tone"], "unscorable_consequence": "block"}
-            fail_stage = _stage(repo, root / "fail", fail_exp, fail_rubric, fail_reg, dataset)
-            review_path = root / "fail-review.json"
-            review_path.write_text(json.dumps({"item_id": "dev-1", "criterion_id": "C-tone", "criterion_version": "1.0", "reviewer_id": "fixture-expert", "rubric_version": "1.0", "verdict": "Fail", "evidence_note": "headline adds a claim"}) + "\n")
-            fail_cfg = _config(fail_stage, reviews_path=str(review_path))
-            failed = run_gate(fail_cfg, limit=1)
-            failed_payload = _payload(failed)
-            report.add(
-                case,
-                "accepted-gate-fail",
-                failed_payload.get("exit_code") == 1 and failed_payload.get("release_verdict") == "fail",
-                f"exit={failed_payload.get('exit_code')} verdict={failed_payload.get('release_verdict')}",
-            )
-            faults = {
-                "gate-missing-approval": lambda exp, rub, reg: rub["review"].update({"approval_state": "pending", "product_domain_approver": None, "approved_version": None, "approved_date": None}),
-                "gate-missing-version": lambda exp, rub, reg: [row.update({"criterion_version": ""}) for row in reg.get("routes") or [] if row.get("criterion_id") == "C-len"],
-                "gate-version-mismatch": lambda exp, rub, reg: [row.update({"criterion_version": "9.9"}) for row in reg.get("routes") or [] if row.get("criterion_id") == "C-len"],
-                "gate-missing-acceptance": lambda exp, rub, reg: [row.update({"acceptance_state": "accepted", "evidence": {"approved": True}}) for row in reg.get("routes") or [] if row.get("criterion_id") == "C-len"],
-            }
-            fault_tokens = {
-                "gate-missing-approval": "approval",
-                "gate-missing-version": "missing version",
-                "gate-version-mismatch": "version mismatch",
-                "gate-missing-acceptance": "acceptance",
-            }
-            for name, mutate in faults.items():
-                exp, rub, reg = _accepted_len(expectations, rubric, register)
-                mutate(exp, rub, reg)
-                staged = _stage(repo, root / name, exp, rub, reg, dataset)
-                try:
-                    ok_refuse, detail = _refused(staged)
-                except Exception as exc:
-                    ok_refuse, detail = False, f"{type(exc).__name__}: {exc}"
-                token = fault_tokens[name]
-                report.add(case, name, ok_refuse and token in detail.lower(), detail)
-            unscorable = summarize(
-                [{"criterion_id": "C-len", "applicability": "applicable", "status": "UNSCORABLE", "shadow": False}],
-                {"required_criteria": ["C-len"], "unscorable_consequence": "block"},
-            )
-            pending_summary = summarize(
-                [{"criterion_id": "C-tone", "applicability": "applicable", "status": "PENDING", "shadow": False}],
-                {"required_criteria": ["C-tone"], "unscorable_consequence": "block"},
-            )
-            blocked_unscorable = evaluate_decision(unscorable, ready_pre, [])
-            blocked_pending = evaluate_decision(pending_summary, ready_pre, [])
-            report.add(case, "all-unscorable-not-pass", blocked_unscorable.exit_code != 0 and blocked_unscorable.release_verdict != "pass", f"exit={blocked_unscorable.exit_code}")
-            report.add(case, "pending-required-not-pass", blocked_pending.exit_code != 0 and blocked_pending.release_verdict != "pass", f"exit={blocked_pending.exit_code}")
-            accepted = summarize(
-                [{"criterion_id": "C-len", "applicability": "applicable", "status": "PASS", "shadow": False}],
-                {"required_criteria": ["C-len"], "unscorable_consequence": "block"},
-            )
-            base = evaluate_decision(accepted, ready_pre, [{"criterion_id": "C-faithful", "status": "FAIL", "shadow": True}])
-            flipped = evaluate_decision(accepted, ready_pre, [{"criterion_id": "C-faithful", "status": "PASS", "shadow": True}])
-            parse_fail = evaluate_decision(accepted, ready_pre, "{not-json")
-            report.add(case, "shadow-does-not-flip", base.exit_code == flipped.exit_code == parse_fail.exit_code == 0, f"{base.exit_code},{flipped.exit_code},{parse_fail.exit_code}")
-            required_shadow = summarize(
-                [{"criterion_id": "C-len", "applicability": "applicable", "status": "PASS", "shadow": False}],
-                {"required_criteria": ["C-len", "C-faithful"], "unscorable_consequence": "block"},
-            )
-            blocked = evaluate_decision(required_shadow, ready_pre, [{"criterion_id": "C-faithful", "status": "PASS", "shadow": True}])
-            report.add(case, "required-shadow-blocks", blocked.exit_code == 2 and blocked.release_verdict is None, f"exit={blocked.exit_code}")
-            review_path = root / "human-pass.json"
-            review_path.write_text(json.dumps({"item_id": "dev-1", "criterion_id": "C-tone", "criterion_version": "1.0", "reviewer_id": "fixture-expert", "rubric_version": "1.0", "verdict": "Pass", "evidence_note": "opening words match"}) + "\n")
-            reviews = import_reviews(str(review_path))
-            report.add(case, "human-import", bool(reviews) and reviews[0].pending is False, str(reviews[0]))
-            pending_path = root / "human-pending.json"
-            pending_path.write_text(json.dumps({"item_id": "dev-1", "criterion_id": "C-tone", "verdict": "Pass"}) + "\n")
-            pending = import_reviews(str(pending_path))
-            report.add(case, "pending-review", bool(pending) and pending[0].pending is True, str(pending[0]))
-            writer_cfg = _config(ready, mode="diagnostic", use_langfuse=False, results_dir=str(root / "bypass-results"))
+        dataset = _load(repo / "Knowledge" / "dev_manifest.json") or {
+            "id": "dev-set",
+            "version": "1",
+            "items": [{"id": "dev-1", "content": "Alpha budget note"}],
+        }
+        box["expectations"] = expectations
+        box["rubric"] = rubric
+        box["register"] = register
+        box["dataset"] = dataset
+        box["tmp"] = tempfile.TemporaryDirectory(prefix="ai-eval-skills-probes-")
+        box["root"] = Path(box["tmp"].name)
+        ready_exp, ready_rubric, ready_reg = _accepted_len(expectations, rubric, register)
+        ready = _stage(repo, box["root"] / "ready", ready_exp, ready_rubric, ready_reg, dataset)
+        box["ready"] = ready
+        ready_pre = box["preflight_gate"](_config(ready))
+        box["ready_pre"] = ready_pre
+        ok = ready_pre.ok is True
+        return ok, getattr(ready_pre, "blocked_reason", None)
 
-            class _BlockLangfuse:
-                def find_spec(self, fullname, path, target=None):
-                    if fullname == "langfuse" or fullname.startswith("langfuse."):
-                        raise RuntimeError("langfuse import blocked")
-                    return None
+    def _gate_pass():
+        passed = box["run_gate"](_config(box["ready"]), limit=1)
+        payload = _payload(passed)
+        evidence_kept = "implementation_version" in json.dumps(payload)
+        meta_path = box["ready"] / "probe-results" / "run_meta.json"
+        if meta_path.exists():
+            evidence_kept = evidence_kept or "implementation_version" in meta_path.read_text()
+        ok = payload.get("exit_code") == 0 and payload.get("release_verdict") == "pass" and evidence_kept
+        return ok, f"exit={payload.get('exit_code')} verdict={payload.get('release_verdict')} evidence={evidence_kept}"
 
-            class _BlockSocket(socket.socket):
-                def connect(self, address):
-                    raise OSError("network blocked during langfuse bypass")
+    def _gate_fail():
+        expectations, rubric, register = box["expectations"], box["rubric"], box["register"]
+        fail_exp, fail_rubric, fail_reg = _accepted_len(expectations, rubric, register)
+        for route in fail_reg.get("routes") or []:
+            if route.get("criterion_id") == "C-tone":
+                _accept_route(
+                    route,
+                    {
+                        "kind": "human_procedure",
+                        "reviewer_id": "fixture-expert",
+                        "rubric_version": "1.0",
+                        "item_reviews": [
+                            {
+                                "item_id": "dev-1",
+                                "reviewer_id": "fixture-expert",
+                                "verdict": "Pass",
+                                "evidence_note": "procedure check",
+                            }
+                        ],
+                    },
+                )
+        fail_reg["decision_policy"] = {"required_criteria": ["C-tone"], "unscorable_consequence": "block"}
+        fail_stage = _stage(repo, box["root"] / "fail", fail_exp, fail_rubric, fail_reg, box["dataset"])
+        review_path = box["root"] / "fail-review.json"
+        review_path.write_text(
+            json.dumps(
+                {
+                    "item_id": "dev-1",
+                    "criterion_id": "C-tone",
+                    "criterion_version": "1.0",
+                    "reviewer_id": "fixture-expert",
+                    "rubric_version": "1.0",
+                    "verdict": "Fail",
+                    "evidence_note": "headline adds a claim",
+                }
+            )
+            + "\n"
+        )
+        failed = box["run_gate"](_config(fail_stage, reviews_path=str(review_path)), limit=1)
+        payload = _payload(failed)
+        ok = payload.get("exit_code") == 1 and payload.get("release_verdict") == "fail"
+        return ok, f"exit={payload.get('exit_code')} verdict={payload.get('release_verdict')}"
 
-            sys.modules.pop("langfuse", None)
-            sys.meta_path.insert(0, _BlockLangfuse())
-            original_socket = socket.socket
-            socket.socket = _BlockSocket
-            try:
-                from eval_harness.langfuse_writer import make_writer
-                writer = make_writer(writer_cfg)
-                writer.write({"k": 1, "decision_eligible": False}, [{"item_id": "dev-1"}], {"pass_rate": None}, {"release_verdict": None})
-                reread = json.loads((root / "bypass-results" / "run_meta.json").read_text())
-                report.add(case, "langfuse-bypass", "langfuse" not in sys.modules and reread.get("k") == 1, "local round-trip under import and network traps")
-            finally:
-                socket.socket = original_socket
-                sys.meta_path.pop(0)
-        if overlap_fn is None:
-            report.add(case, "iou", False, "no overlap or IoU function on eval_harness.metrics")
-        else:
-            overlap_value = overlap_fn((0, 10), (5, 15))
-            expected = (5 / 15) if overlap_fn.__name__ == "interval_iou" else 5
-            report.add(case, "iou", overlap_value is not None and abs(overlap_value - expected) < 1e-9, f"{overlap_fn.__name__}={overlap_value}")
-        proxy_blob = " ".join(str(item) for item in proxies)
-        decision_metrics = getattr(accepted, "decision_metrics", {}) or {}
-        report.add(case, "proxies-separate", "proxy_" in proxy_blob and not any(str(name).startswith("proxy_") for name in decision_metrics), proxy_blob)
+    def _fault(name, mutate, token):
+        def _probe():
+            exp, rub, reg = _accepted_len(box["expectations"], box["rubric"], box["register"])
+            mutate(exp, rub, reg)
+            staged = _stage(repo, box["root"] / name, exp, rub, reg, box["dataset"])
+            ok_refuse, detail = _refused(staged)
+            return ok_refuse and token in detail.lower(), detail
+        return _probe
+
+    faults = {
+        "gate-missing-approval": (
+            lambda exp, rub, reg: rub["review"].update(
+                {"approval_state": "pending", "product_domain_approver": None, "approved_version": None, "approved_date": None}
+            ),
+            "approval",
+        ),
+        "gate-missing-version": (
+            lambda exp, rub, reg: [row.update({"criterion_version": ""}) for row in reg.get("routes") or [] if row.get("criterion_id") == "C-len"],
+            "missing version",
+        ),
+        "gate-version-mismatch": (
+            lambda exp, rub, reg: [row.update({"criterion_version": "9.9"}) for row in reg.get("routes") or [] if row.get("criterion_id") == "C-len"],
+            "version mismatch",
+        ),
+        "gate-missing-acceptance": (
+            lambda exp, rub, reg: [
+                row.update({"acceptance_state": "accepted", "evidence": {"approved": True}})
+                for row in reg.get("routes") or []
+                if row.get("criterion_id") == "C-len"
+            ],
+            "acceptance",
+        ),
+    }
+
+    def _unscorable():
+        summary = box["summarize"](
+            [{"criterion_id": "C-len", "applicability": "applicable", "status": "UNSCORABLE", "shadow": False}],
+            policy_len,
+        )
+        blocked = box["evaluate_decision"](summary, box["ready_pre"], [])
+        ok = blocked.exit_code != 0 and blocked.release_verdict != "pass"
+        return ok, f"exit={blocked.exit_code} verdict={blocked.release_verdict} blocked={_summary_attr(summary, 'blocked_reason')}"
+
+    def _pending():
+        summary = box["summarize"](
+            [{"criterion_id": "C-tone", "applicability": "applicable", "status": "PENDING", "shadow": False}],
+            {"required_criteria": ["C-tone"], "unscorable_consequence": "block"},
+        )
+        blocked = box["evaluate_decision"](summary, box["ready_pre"], [])
+        ok = blocked.exit_code != 0 and blocked.release_verdict != "pass"
+        return ok, f"exit={blocked.exit_code} verdict={blocked.release_verdict}"
+
+    def _shadow_flip():
+        accepted = box["summarize"](
+            [{"criterion_id": "C-len", "applicability": "applicable", "status": "PASS", "shadow": False}],
+            policy_len,
+        )
+        base = box["evaluate_decision"](accepted, box["ready_pre"], [{"criterion_id": "C-faithful", "status": "FAIL", "shadow": True}])
+        flipped = box["evaluate_decision"](accepted, box["ready_pre"], [{"criterion_id": "C-faithful", "status": "PASS", "shadow": True}])
+        parse_fail = box["evaluate_decision"](accepted, box["ready_pre"], "{not-json")
+        ok = base.exit_code == flipped.exit_code == parse_fail.exit_code == 0
+        return ok, f"{base.exit_code},{flipped.exit_code},{parse_fail.exit_code}"
+
+    def _required_shadow():
+        summary = box["summarize"](
+            [{"criterion_id": "C-len", "applicability": "applicable", "status": "PASS", "shadow": False}],
+            {"required_criteria": ["C-len", "C-faithful"], "unscorable_consequence": "block"},
+        )
+        ids = list(_summary_attr(summary, "required_shadow_ids") or [])
+        blocked = box["evaluate_decision"](summary, box["ready_pre"], [{"criterion_id": "C-faithful", "status": "PASS", "shadow": True}])
+        ok = "C-faithful" in ids and blocked.exit_code == 2 and blocked.release_verdict is None
+        return ok, f"ids={ids} exit={blocked.exit_code} verdict={blocked.release_verdict}"
+
+    def _human_import():
+        review_path = box["root"] / "human-pass.json"
+        review_path.write_text(
+            json.dumps(
+                {
+                    "item_id": "dev-1",
+                    "criterion_id": "C-tone",
+                    "criterion_version": "1.0",
+                    "reviewer_id": "fixture-expert",
+                    "rubric_version": "1.0",
+                    "verdict": "Pass",
+                    "evidence_note": "opening words match",
+                }
+            )
+            + "\n"
+        )
+        reviews = box["import_reviews"](str(review_path))
+        return bool(reviews) and reviews[0].pending is False, str(reviews[0])
+
+    def _pending_review():
+        pending_path = box["root"] / "human-pending.json"
+        pending_path.write_text(json.dumps({"item_id": "dev-1", "criterion_id": "C-tone", "verdict": "Pass"}) + "\n")
+        pending = box["import_reviews"](str(pending_path))
+        return bool(pending) and pending[0].pending is True, str(pending[0])
+
+    def _langfuse():
+        writer_cfg = _config(box["ready"], mode="diagnostic", use_langfuse=False, results_dir=str(box["root"] / "bypass-results"))
+
+        class _BlockLangfuse:
+            def find_spec(self, fullname, path, target=None):
+                if fullname == "langfuse" or fullname.startswith("langfuse."):
+                    raise RuntimeError("langfuse import blocked")
+                return None
+
+        class _BlockSocket(socket.socket):
+            def connect(self, address):
+                raise OSError("network blocked during langfuse bypass")
+
+        sys.modules.pop("langfuse", None)
+        sys.meta_path.insert(0, _BlockLangfuse())
+        original_socket = socket.socket
+        socket.socket = _BlockSocket
         try:
-            assert_held_out_disjoint({"items": [{"id": "dev-1", "content": "same"}]}, {"items": [{"id": "hold-9", "content": "same"}]})
-            report.add(case, "overlap-rejected", False, "overlap was accepted")
+            from eval_harness.langfuse_writer import make_writer
+            writer = make_writer(writer_cfg)
+            writer.write({"k": 1, "decision_eligible": False}, [{"item_id": "dev-1"}], {"pass_rate": None}, {"release_verdict": None})
+            reread = json.loads((box["root"] / "bypass-results" / "run_meta.json").read_text())
+            ok = "langfuse" not in sys.modules and reread.get("k") == 1
+            return ok, "local round-trip under import and network traps"
+        finally:
+            socket.socket = original_socket
+            sys.meta_path.pop(0)
+
+    def _iou():
+        metrics = box["metrics"]
+        fn = None
+        for name in dir(metrics):
+            if "iou" in name.lower() or "overlap" in name.lower():
+                cand = getattr(metrics, name)
+                if callable(cand):
+                    fn = cand
+                    break
+        if fn is None:
+            return True, "no interval evidence on this register; overlap function not required"
+        value = fn((0, 10), (5, 15))
+        expected = (5 / 15) if "iou" in fn.__name__.lower() else 5
+        return value is not None and abs(value - expected) < 1e-9, f"{fn.__name__}={value}"
+
+    def _proxies():
+        metrics = box["metrics"]
+        found = None
+        for name, value in vars(metrics).items():
+            if "PROXY" in name and isinstance(value, (dict, list, tuple, set)):
+                found = name
+                break
+        if found is None:
+            return False, "no separate proxy-name mapping on eval_harness.metrics"
+        summary = box.get("summary")
+        leaked = []
+        if summary is not None:
+            for field in (
+                "denominator",
+                "pass_count",
+                "fail_count",
+                "not_applicable_count",
+                "unscorable_count",
+                "pending_count",
+                "error_count",
+                "pass_rate",
+                "blocked_reason",
+                "required_shadow_ids",
+            ):
+                if field.startswith("proxy_"):
+                    leaked.append(field)
+        return not leaked, found
+
+    def _overlap():
+        try:
+            box["assert_held_out_disjoint"](
+                {"items": [{"id": "dev-1", "content": "same"}]},
+                {"items": [{"id": "hold-9", "content": "same"}]},
+            )
         except ValueError as exc:
-            report.add(case, "overlap-rejected", "overlap" in str(exc), str(exc))
-    except Exception as exc:
-        report.add(case, "generated-behavior-probes", False, f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}")
+            return "overlap" in str(exc).lower() or "shared" in str(exc).lower(), str(exc)
+        return False, "overlap was accepted"
+
+    try:
+        _run_probe(report, case, "accepted-preflight", _stage_ready)
+        _run_probe(report, case, "accepted-gate-pass", _gate_pass)
+        _run_probe(report, case, "accepted-gate-fail", _gate_fail)
+        for name, (mutate, token) in faults.items():
+            _run_probe(report, case, name, _fault(name, mutate, token))
+        _run_probe(report, case, "all-unscorable-not-pass", _unscorable)
+        _run_probe(report, case, "pending-required-not-pass", _pending)
+        _run_probe(report, case, "shadow-does-not-flip", _shadow_flip)
+        _run_probe(report, case, "required-shadow-blocks", _required_shadow)
+        _run_probe(report, case, "human-import", _human_import)
+        _run_probe(report, case, "pending-review", _pending_review)
+        _run_probe(report, case, "langfuse-bypass", _langfuse)
+        _run_probe(report, case, "iou", _iou)
+        _run_probe(report, case, "proxies-separate", _proxies)
+        _run_probe(report, case, "overlap-rejected", _overlap)
+    finally:
+        tmp = box.get("tmp")
+        if tmp is not None:
+            tmp.cleanup()
+
+
+def check_d(repo: Path, report: Report) -> None:
+    case = "D"
+    reg = _load(repo / "Knowledge" / "evaluator-register.json")
+    report.add(case, "register-present", reg is not None, "evaluator-register.json")
+    routes = (reg or {}).get("routes") or []
+    by_id = {row.get("criterion_id"): row for row in routes if isinstance(row, dict)}
+
+    def _route(cid):
+        row = by_id.get(cid) or {}
+        return row
+
+    rare = _route("C-hold")
+    scale = _route("C-claim")
+    report.add(case, "rare-human", rare.get("evaluator_type") == "human", str(rare.get("evaluator_type")))
+    rationale = str(scale.get("measurement_rationale") or "")
+    volume = any(token in rationale.lower() for token in ("thousand", "per day", "daily", "volume", "at scale", "scale"))
+    report.add(
+        case,
+        "scale-llm-volume",
+        scale.get("evaluator_type") == "llm" and rationale.strip() != "" and volume,
+        rationale,
+    )
+    accepted = [
+        row.get("criterion_id")
+        for row in routes
+        if row.get("acceptance_state") == "accepted" or row.get("decision_eligible") is True
+    ]
+    report.add(case, "none-accepted", not accepted, str(accepted))
+    blob = json.dumps(reg or {})
+    banned = []
+    for token in ("Hard", "Soft", "launch_policy", "launch-policy", "launch policy"):
+        if token in blob:
+            banned.append(token)
+    report.add(case, "no-hard-soft-launch", not banned, ",".join(banned) if banned else "absent")
+    harness = (repo / "eval_harness" / "run_eval.py").exists()
+    report.add(case, "harness-present", harness, "eval_harness/run_eval.py")
+
 
 
 def main() -> None:
@@ -572,6 +805,7 @@ def main() -> None:
         "A-missing-expectations": check_a,
         "B-expectations-only": check_b,
         "C-approved-criteria": check_c,
+        "D-approved-unrouted": check_d,
     }
     for name, fn in mapping.items():
         repo = root / name

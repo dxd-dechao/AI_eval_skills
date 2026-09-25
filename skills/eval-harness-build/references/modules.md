@@ -39,9 +39,15 @@ Required fields: `mode` (`"diagnostic"` default, or `"gate"`), `limit` (default 
 - expectations state is `NEEDS_PRODUCT_DECISION` or the file is missing
 - rubric `review.approval_state` is not approved, or approver/date/version is missing
 - a required criterion is absent, or its evaluator version does not match the register
-- acceptance evidence is missing or is only a bare boolean
+- acceptance evidence is missing, is only a bare boolean (`approved: true` or `validated: true`), or lacks the minimum fields for its route kind (see below)
 - development and held-out manifests share an item id or normalized content
 - the decision policy names a criterion whose route is unaccepted
+
+Minimum acceptance evidence, checked by `preflight_gate` whenever a route is `acceptance_state: accepted` or is required for a decision. Reject the route when these fields are absent. Do not treat a boolean flag as a substitute. Do not require a universal numeric threshold.
+
+- **Deterministic verification** (`evidence.kind` = `verification`): `cases` includes one object with `role` `known-good`, one with `role` `known-bad`, and one with `role` `edge` or `shortcut`. Each of those objects has a non-empty `expected` outcome. `implementation_version` is a non-empty string.
+- **Human procedure** (`evidence.kind` = `human_procedure`): a non-empty `reviewer_id`, or a `reviewer` object with a non-empty `id`. A non-empty `rubric_version` or `procedure_version`. `item_reviews` is a non-empty list; each object has non-empty `item_id`, `reviewer_id`, and `verdict`.
+- **LLM held-out** (`evidence.kind` = `held_out`): non-empty `dataset_id`, `dataset_version`, and `labels_ref`. `agreement`, `stability`, and `run_health` are each a non-empty object or non-empty string describing the check for that label regime (presence only; no cutoff). `acceptance_decision` is an object with a non-empty `scope`.
 
 `PreflightResult` fields: `ok: bool`, `blocked_reason: str | None`, `decision_eligible: bool`.
 
@@ -83,13 +89,23 @@ Unknown applicability serializes as `UNSCORABLE` and must not be stored as not a
 
 ## human_review.py
 
-`import_reviews(path) -> list[Review]` reads a local JSON/JSONL file. Required fields: `item_id`, `criterion_id`, `criterion_version`, `reviewer_id`, `rubric_version`, `verdict` (`Pass` or `Fail`), `evidence_note`. No network and no LLM credential. Pending or unsigned rows stay pending.
+`import_reviews(path) -> list[Review]` reads a local JSON/JSONL file. Required fields: `item_id`, `criterion_id`, `criterion_version`, `reviewer_id`, `rubric_version`, `verdict` (`Pass` or `Fail`), `evidence_note`. No network and no LLM credential. `Review.pending` is true when any required field is missing or `verdict` is not `Pass` or `Fail`. Pending rows stay pending.
 
 ## metrics.py
 
-`summarize(results, policy) -> Summary` counts only scorable applicable units in the denominator. Not applicable is excluded. Unscorable, pending, and error counts are separate fields and stay visible.
+`summarize(results, policy) -> Summary`. `Summary` always exposes these top-level decision aggregates, computed under the Product-approved aggregation rule:
 
-`pass_rate = pass_count / denominator` only when `denominator > 0`. If the denominator is 0, or every required result is unscorable, pending, or missing, `pass_rate` is null and `blocked_reason` explains why. That is not a pass.
+`denominator`, `pass_count`, `fail_count`, `not_applicable_count`, `unscorable_count`, `pending_count`, `error_count`, `pass_rate`, `blocked_reason`, `required_shadow_ids`.
+
+An optional `criteria` map may repeat that same field set per criterion id. Top-level fields are the decision aggregate. Callers read the top-level fields; they do not have to read `criteria`.
+
+Count only scorable applicable units (`PASS` or `FAIL` with applicability `applicable`) in `denominator`. Not applicable is excluded. Unknown applicability counts as unscorable, not as not applicable. Unscorable, pending, and error counts stay visible in their own fields.
+
+`pass_rate = pass_count / denominator` only when `denominator > 0` and it is not true that every required criterion is unscorable, pending, error, or missing. Otherwise `pass_rate` is null and `blocked_reason` explains why. That is not a pass.
+
+`required_shadow_ids` lists every id in `policy["required_criteria"]` that has no result with `shadow` false. A missing required criterion and a required criterion whose results are all `shadow: true` both belong in that list. Preserve policy order.
+
+Default when the register marks criteria only as `required` (`decision_consequence.rule` or `decision_policy.required_criteria`, with no rate and no threshold): each required criterion needs at least one scorable applicable unit and no `FAIL`. An unscorable, pending, error, or missing required criterion sets `blocked_reason` and blocks. A `FAIL` on a required criterion stays a quality failure (`fail_count`), not a configuration block. Any other rule (rates, thresholds) must come from Product and is never invented by the skill. `evaluate_decision` applies this default from the `Summary` fields above; it does not take a separate policy argument.
 
 Confidence intervals are computed only inside `summarize` for a declared aggregate measurement. Never attach an interval to one item. Stratify by an axis the dataset actually has; do not invent one.
 
@@ -103,7 +119,8 @@ Production proxy names are a separate dict and are omitted from decision metrics
 
 - If `preflight.ok` is false: `exit_code=2`, `release_verdict=null`, `blocked_reason` copied from preflight. Do not look at quality scores.
 - Shadow results are stored under `shadow` and ignored by the exit code. Changing a shadow verdict or injecting a shadow parse error must not change `exit_code` when the accepted policy still passes.
-- If policy requires a shadow or unaccepted criterion: `exit_code=2`, blocked, not silently omitted.
+- If `summary.required_shadow_ids` is non-empty, or policy requires a shadow or unaccepted criterion: `exit_code=2`, `release_verdict=null`, blocked, not silently omitted.
+- If `summary.blocked_reason` is set because a required criterion is unscorable, pending, error, or missing: `exit_code=2`, `release_verdict=null`. A required `FAIL` is `exit_code=1`, `release_verdict="fail"`.
 - Accepted policy with a real pass under the Product aggregation rule: `exit_code=0`, `release_verdict="pass"`.
 - Accepted policy with a real fail: `exit_code=1`, `release_verdict="fail"`.
 - Respect the register's unscorable consequence (block versus report). Do not treat unscorable as pass.
