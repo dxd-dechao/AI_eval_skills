@@ -41,12 +41,17 @@ Required fields: `mode` (`"diagnostic"` default, or `"gate"`), `limit` (default 
 `preflight_gate(config) -> PreflightResult` runs only for decision use. It checks the Eval Spec **before any other gate check and before any quality evaluation**:
 
 - If the spec is missing, `state` is not `READY`, or any of the 8 decisions lacks an answer or a holder: return `ok=False` and `blocked_reason` exactly `eval spec not ready: <missing items>` (name the missing file, the state, or the decision ids). Do not continue to later checks.
-- If `trial_contract.mode` is not `k=1`, or `trial_contract.k` is not `1`, or `config.runs` is not `1`: return `ok=False` and `blocked_reason` exactly `unsupported trial contract: <mode> k=<k>` using the spec's mode and k (use `missing` when the contract is absent). Do not implement `pass^k` or `pass@k`. Do not continue to later checks.
+- If `trial_contract.mode` is not exactly `k=1`, `pass^k`, or `pass@k`, or `trial_contract.k` is not a positive integer, or (`mode` is `k=1` and `k` is not `1`): return `ok=False` and `blocked_reason` exactly `invalid trial contract: <mode> k=<k>` (use `missing` for an absent mode or k). Do not continue.
+- If `config.runs != trial_contract.k`: return `ok=False` and `blocked_reason` exactly `runs mismatch: config.runs=<n> spec k=<k>`. Do not continue.
+- Isolation, before scoring. Product state is memory, cache, history, or files a later call can read such that the same arguments can yield a different product result. A provenance counter that criteria do not score is not product state. A pure function of its arguments records `isolation: not_required`. When the app is stateful, resolve the application's own reset or new-instance callable discovered from code (do not reimplement it). If that callable is missing, record `isolation: unverified` and return `ok=False` with `blocked_reason` exactly `trial isolation unverified`. Do not continue.
+- Judgment unit, before scoring. Canonical units are `output`, `session`, and `episode`, read from top-level `judgment_unit` when that field is one of those tokens. A required criterion's `applicable_unit` must equal that token. Otherwise return `ok=False` and `blocked_reason` exactly `unit mismatch: <criterion> <unit> != <spec unit>`. Do not continue. When `judgment_unit` is absent, skip this check (prose Stage 00 answers are not tokens). A criterion whose `applicable_unit` is a finer grain than the spec unit (for example `turn` under `session`) is diagnostic decomposition only: it is never required, never a gate input, and never aggregated into the session or episode outcome.
 
-Only when those two checks pass, also return `ok=False` and a `blocked_reason` **before any quality evaluation** when:
+The skill never chooses `k`, the mode, or a threshold. They come from the Eval Spec only.
+
+Only when those checks pass, also return `ok=False` and a `blocked_reason` **before any quality evaluation** when:
 
 - expectations state is `NEEDS_PRODUCT_DECISION` or the file is missing
-- rubric `review.approval_state` is not approved, or approver/date/version is missing
+- rubric `review.approval_state` is not approved, or approver/date/version is missing. `blocked_reason` contains `approval`
 - a required criterion is absent, or its evaluator version does not match the register
 - acceptance evidence is missing, is only a bare boolean (`approved: true` or `validated: true`), or lacks the minimum fields for its route kind (see below)
 - development and held-out manifests share an item id or normalized content
@@ -68,7 +73,15 @@ An empty check list is `ok=False` with reason `no gate checks configured`. It is
 
 ## pipeline_adapter.py
 
-`run_item(item) -> PipelineResult` calls the application's real entrypoint once per item. `PipelineResult` includes `item_id`, `raw_output`, `invocation_count` for that call, and provenance (code path or version). Do not duplicate product logic.
+`run_item(item) -> PipelineResult` calls the application's real entrypoint for one trial. The runner, not the adapter, loops trials. Before each trial, call the application's reset or new-instance path when product state exists. `PipelineResult` includes `item_id`, `trial_index`, `raw_output`, `invocation_count` for that call, and provenance (code path or version). Do not duplicate product logic.
+
+Drive the entrypoint from the dataset item's `unit`, which matches the spec's `judgment_unit`:
+
+- `output`: one call; return that output.
+- `session`: one fresh state; replay `turns` in order; return the ordered turn outputs. History may accumulate inside that trial and must not survive `reset`.
+- `episode`: one fresh state; return `{trajectory, final_state}` from what the app actually exposes. If a trajectory criterion needs a trajectory and the app does not expose one, that criterion is `UNSCORABLE` with reason `trajectory not observable`. Do not infer a trajectory.
+
+Adapter exceptions, timeouts, and dependency outages (`ConnectionError`, `TimeoutError`, or an exception whose class name or message documents an infrastructure or dependency outage) are not product failures. Record that trial as `RUN_HEALTH`. Do not convert it to `FAIL`.
 
 ## evaluators
 
@@ -102,9 +115,30 @@ Unknown applicability serializes as `UNSCORABLE` and must not be stored as not a
 
 ## metrics.py
 
-`summarize(results, policy) -> Summary`. `Summary` always exposes these top-level decision aggregates, computed under the Product-approved aggregation rule:
+`aggregate_trials(trial_statuses, mode, k) -> dict` with `status` and `reason`. `trial_statuses` has one entry per executed trial: `PASS`, `FAIL`, `UNSCORABLE`, `PENDING`, `ERROR`, or `RUN_HEALTH`. `RUN_HEALTH` is not a valid judgment. `k` and `mode` come from the spec being applied. Do not drop or reorder trials. Do not keep a best-of-N result.
+
+Truth table, first match wins:
+
+| Condition | Item status |
+|---|---|
+| Valid trials (not `RUN_HEALTH`) fewer than `k` | `UNSCORABLE`, reason `incomplete trials`. Never Pass or Fail. |
+| `k=1` | The single trial's status. |
+| `pass^k`, any valid trial is `FAIL` | `FAIL` |
+| `pass^k`, any valid trial is `UNSCORABLE`, `PENDING`, or `ERROR` | `UNSCORABLE` |
+| `pass^k`, all `k` trials are `PASS` | `PASS` |
+| `pass@k`, any valid trial is `PASS` | `PASS` |
+| `pass@k`, any valid trial is `UNSCORABLE`, `PENDING`, or `ERROR` | `UNSCORABLE` |
+| `pass@k`, all `k` trials are `FAIL` | `FAIL` |
+
+`reaggregate_item(trial_rows, trial_contract) -> dict` applies `aggregate_trials` to stored trial rows. It does not call the application. Use it when the same trials are read under another mode with the same `k`.
+
+`compare_runs(left_meta, right_meta)` raises `ValueError` with message `cannot compare across trial contracts` when `trial_mode` or `k` differs. It has no default `k` and no threshold.
+
+`summarize(results, policy) -> Summary`. `Summary` is an object whose decision fields are attributes (`summary.denominator`, `summary.pass_rate`, `summary.required_shadow_ids`), not a dict. `results` are judgment rows, not trial rows. A row with `criterion_id` and `status` is counted as given. Do not require `row_kind` or `grain`. Skip only rows whose `row_kind` is `trial` or `diagnostic`. `Summary` always exposes these top-level decision aggregates, computed under the Product-approved aggregation rule:
 
 `denominator`, `pass_count`, `fail_count`, `not_applicable_count`, `unscorable_count`, `pending_count`, `error_count`, `pass_rate`, `blocked_reason`, `required_shadow_ids`.
+
+Also set `trial_mode`, `k`, `trial_pass_count`, `trial_count`, and `run_health_count` when `policy` carries them (from the spec and the trial rows). Otherwise leave `trial_mode` and `k` null and the three counts at 0. Those fields do not change `denominator`. `denominator` counts items, not trials. `run_health_count` counts `RUN_HEALTH` trials and is not added to `fail_count`. Diagnostic finer-unit rows (for example turn-level under a session spec) are omitted from `results` passed to `summarize` and from gate inputs.
 
 An optional `criteria` map may repeat that same field set per criterion id. Top-level fields are the decision aggregate. Callers read the top-level fields; they do not have to read `criteria`.
 
@@ -138,23 +172,27 @@ Expose production proxy names as `PRODUCTION_PROXIES`, a dict on `metrics.py`. I
 
 ## dataset_loader.py
 
-Load local JSONL or a JSON array. `assert_held_out_disjoint(development_manifest, held_out_manifest)` raises if any id or normalized content string appears in both. Held-out evidence that overlaps is rejected and cannot be acceptance evidence.
+Load local JSONL or a JSON array. Each item declares `unit` (`output`, `session`, or `episode`) matching the spec `judgment_unit` when that token is present. Session items include ordered `turns`. Episode items are one task episode.
+
+`assert_held_out_disjoint(development_manifest, held_out_manifest)` raises if any item id, normalized content string, `session_id`, or `episode_id` appears in both. Compare `session_id` and `episode_id` when those fields are present. Held-out evidence that overlaps is rejected and cannot be acceptance evidence.
 
 ## langfuse_writer.py
 
-`LocalResultsWriter` writes `run_meta.json`, `items.jsonl`, `summary.json`, and `decision.json`. `run_meta.json` includes criterion versions, evaluator versions, acceptance state, the accepted evidence object (including `implementation_version` when that route is deterministic), provenance, `decision_eligible`, `k`, and `trial_contract`.
+`LocalResultsWriter` writes `run_meta.json`, `items.jsonl`, `summary.json`, and `decision.json`. `run_meta.json` includes criterion versions, evaluator versions, acceptance state, the accepted evidence object (including `implementation_version` when that route is deterministic), provenance, `decision_eligible`, `k`, `trial_mode`, `trial_contract`, `isolation` (`not_required`, `verified`, or `unverified`), `trial_pass_count`, `trial_count`, `run_health_count`, and version stamps: `suite_version`, `dataset_version` (from the dataset manifest), `evaluator_version` (from the register rows), `harness_version` (the package `__version__`), and `trial_policy_version` (the spec mode and k, formatted `mode:k`). Do not invent a threshold version.
 
-`trial_contract` is copied from the Eval Spec (`{"mode": "k=1" | "pass^k" | "pass@k", "k": <int>}`) when the spec file loads. When no spec is loaded, write `trial_contract: null`. Diagnostic mode always records this field and still runs when the contract is not `k=1`. Gate mode never reaches the writer when preflight refused the spec.
+`items.jsonl` has one JSON object per line: every trial row (`row_kind` `trial`, `item_id`, `trial_index`, trial `status`, `raw_output`) and one aggregated item row (`row_kind` `item`, `item_id`, `status`, `reason`). Finer-unit diagnostic rows use `row_kind` `diagnostic` and are not item rows.
+
+`trial_contract` is copied from the Eval Spec (`{"mode": "k=1" | "pass^k" | "pass@k", "k": <int>}`) when the spec file loads. When no spec is loaded, write `trial_contract: null`. Diagnostic mode always records this field and still runs. Gate mode never reaches the writer when preflight refused the spec.
 
 `make_writer(config)` returns the local writer when `use_langfuse` is false and must not import `langfuse` anywhere on that path. A Langfuse writer subclass imports `langfuse` only inside its own methods. Local files are still written.
 
 ## run_eval.py
 
-`run(config, limit=None) -> RunResult` uses `config.limit` when `limit` is omitted. Default limit is 1. For each selected item call `run_item` once (k=1). Do not retry and then keep the best score as the k=1 record.
+`run(config, limit=None) -> RunResult` uses `config.limit` when `limit` is omitted. Default limit is 1. Read `k` and `mode` from the Eval Spec. For each selected item, run `k` independent trials. Each trial calls `run_item` once after a fresh reset when the app has product state. No state, cache, or history may carry between trials. Never keep a best-of-N result as a `k=1` or `pass^k` record. A completed trial's status is `FAIL` if any required applicable criterion is `FAIL`; otherwise `UNSCORABLE`, `PENDING`, or `ERROR` if any required criterion has that status; otherwise `PASS`. Then set the item status with `aggregate_trials`. Feed item rows to `summarize`. `RUN_HEALTH` trials increment `run_health_count` and are not `FAIL`.
 
-Diagnostic mode (`config.mode != "gate"`): still record every criterion result, set `decision_eligible=false`, `release_verdict=null`, and return `exit_code=0` when the process itself succeeded (the app was called and results were written). Item-level product failures do not become a release fail in diagnostic mode. Do not refuse a non-`k=1` spec in diagnostic mode; record `trial_contract` in `run_meta.json` and still call the entrypoint.
+Diagnostic mode (`config.mode != "gate"`): still record every criterion result, set `decision_eligible=false`, `release_verdict=null`, and return `exit_code=0` when the process itself succeeded (the app was called and results were written). Item-level product failures do not become a release fail in diagnostic mode. Record `trial_contract` in `run_meta.json` and still call the entrypoint `k` times per selected item.
 
-Gate mode: call `preflight_gate` first. On failure return immediately with `exit_code=2`, `quality_evaluated=false`, and do not call the application entrypoint. On success, evaluate only accepted routes and set the exit code from `evaluate_decision`. The only supported gate contract is spec `trial_contract.mode == "k=1"`, `trial_contract.k == 1`, and `config.runs == 1`.
+Gate mode: call `preflight_gate` first. On failure return immediately with `exit_code=2`, `quality_evaluated=false`, and do not call the application entrypoint. On success, evaluate only accepted routes whose unit equals the spec judgment unit, and set the exit code from `evaluate_decision`.
 
 CLI: `python -m eval_harness.run_eval --mode diagnostic|gate`. Exit with `RunResult.exit_code`.
 
