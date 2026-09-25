@@ -1037,6 +1037,7 @@ def check_g(repo: Path, report: Report) -> None:
             "trial-rows",
             "passk-fail",
             "pass-at-k",
+            "aggregate-precedence",
             "run-health",
             "runs-mismatch",
             "isolation-unverified",
@@ -1083,6 +1084,28 @@ def check_g(repo: Path, report: Report) -> None:
         aggregated = aggregate_trials(statuses, "pass@k", 3)
         status = aggregated.get("status") if isinstance(aggregated, dict) else getattr(aggregated, "status", None)
         return status == "PASS", f"trials={statuses} aggregated={status}"
+
+    def _precedence():
+        _import_harness(repo)
+        from eval_harness.metrics import aggregate_trials
+
+        rows = (
+            ("pass^k", ["FAIL", "RUN_HEALTH", "PASS"], "FAIL", False),
+            ("pass@k", ["PASS", "RUN_HEALTH", "FAIL"], "PASS", False),
+            ("pass^k", ["PASS", "PASS", "RUN_HEALTH"], "UNSCORABLE", True),
+            ("pass@k", ["FAIL", "FAIL", "RUN_HEALTH"], "UNSCORABLE", True),
+        )
+        details = []
+        ok = True
+        for mode, statuses, expected, incomplete in rows:
+            aggregated = aggregate_trials(statuses, mode, 3)
+            status = aggregated.get("status") if isinstance(aggregated, dict) else getattr(aggregated, "status", None)
+            reason = aggregated.get("reason") if isinstance(aggregated, dict) else getattr(aggregated, "reason", "")
+            reason = "" if reason is None else str(reason)
+            row_ok = status == expected and (not incomplete or "incomplete trials" in reason)
+            ok = ok and row_ok
+            details.append(f"{mode} {statuses} -> {status} {reason}")
+        return ok, "; ".join(details)
 
     def _health():
         rows = _jsonl(repo / "results-g" / "items.jsonl")
@@ -1165,6 +1188,7 @@ def check_g(repo: Path, report: Report) -> None:
     _run_probe(report, case, "trial-rows", _trial_rows_probe)
     _run_probe(report, case, "passk-fail", _passk)
     _run_probe(report, case, "pass-at-k", _pass_at)
+    _run_probe(report, case, "aggregate-precedence", _precedence)
     _run_probe(report, case, "run-health", _health)
     _run_probe(report, case, "runs-mismatch", _mismatch)
     _run_probe(report, case, "isolation-unverified", _isolation)

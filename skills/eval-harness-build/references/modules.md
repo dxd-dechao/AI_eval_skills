@@ -117,18 +117,20 @@ Unknown applicability serializes as `UNSCORABLE` and must not be stored as not a
 
 `aggregate_trials(trial_statuses, mode, k) -> dict` with `status` and `reason`. `trial_statuses` has one entry per executed trial: `PASS`, `FAIL`, `UNSCORABLE`, `PENDING`, `ERROR`, or `RUN_HEALTH`. `RUN_HEALTH` is not a valid judgment. `k` and `mode` come from the spec being applied. Do not drop or reorder trials. Do not keep a best-of-N result.
 
-Truth table, first match wins:
+Truth table, first match wins. A valid trial is any status other than `RUN_HEALTH`. `RUN_HEALTH` is never `FAIL`.
 
 | Condition | Item status |
 |---|---|
-| Valid trials (not `RUN_HEALTH`) fewer than `k` | `UNSCORABLE`, reason `incomplete trials`. Never Pass or Fail. |
+| `k=1` and the single trial is `RUN_HEALTH` | `UNSCORABLE`, reason `incomplete trials` |
 | `k=1` | The single trial's status. |
 | `pass^k`, any valid trial is `FAIL` | `FAIL` |
+| `pass^k`, valid trials fewer than `k` | `UNSCORABLE`, reason `incomplete trials` |
 | `pass^k`, any valid trial is `UNSCORABLE`, `PENDING`, or `ERROR` | `UNSCORABLE` |
-| `pass^k`, all `k` trials are `PASS` | `PASS` |
+| `pass^k` | `PASS` (every valid trial passed and there are `k` of them) |
 | `pass@k`, any valid trial is `PASS` | `PASS` |
+| `pass@k`, valid trials fewer than `k` | `UNSCORABLE`, reason `incomplete trials` |
 | `pass@k`, any valid trial is `UNSCORABLE`, `PENDING`, or `ERROR` | `UNSCORABLE` |
-| `pass@k`, all `k` trials are `FAIL` | `FAIL` |
+| `pass@k` | `FAIL` |
 
 `reaggregate_item(trial_rows, trial_contract) -> dict` applies `aggregate_trials` to stored trial rows. It does not call the application. Use it when the same trials are read under another mode with the same `k`.
 

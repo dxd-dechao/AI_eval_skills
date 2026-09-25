@@ -97,5 +97,5 @@ Document variables, the diagnostic default, the gate-mode preflight, and unverif
 - Diagnostic success may exit 0 with `decision_eligible=false` and no release verdict.
 - Gate mode that fails preflight exits nonzero. That is configuration refusal, not a judge-derived Product failure.
 - The spec chooses `k` and the mode (`k=1`, `pass^k`, or `pass@k`). The skill does not. Each trial is one fresh call through the real entrypoint. Best-of-N is never reported as `k=1` or `pass^k`.
-- Infrastructure failures are `RUN_HEALTH`, not product failures. Fewer than `k` valid trials is `UNSCORABLE` (`incomplete trials`).
+- Infrastructure failures are `RUN_HEALTH`, not product failures, and are counted in `run_health_count`. `aggregate_trials` follows the `modules.md` order: a valid `FAIL` decides `pass^k` and a valid `PASS` decides `pass@k` before a short trial set is `UNSCORABLE` (`incomplete trials`). `k=1` returns that trial, or `UNSCORABLE` (`incomplete trials`) when it is `RUN_HEALTH`.
 - A required criterion uses the spec judgment unit. A finer unit is diagnostic only and stays out of the gate aggregate.
