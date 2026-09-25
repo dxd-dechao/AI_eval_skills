@@ -125,6 +125,50 @@ def check_a(repo: Path, report: Report) -> None:
     plumbing = repo / "eval_harness" / "pipeline_adapter.py"
     plumbing_ok = plumbing.exists() and not (repo / "eval_harness" / "gates.py").exists() and not (repo / "eval_harness" / "evaluators").exists()
     report.add(case, "neutral-plumbing", plumbing_ok, str(plumbing) if plumbing_ok else "follow-up plumbing missing or it included scoring")
+    _check_spec_intake(repo, report, case)
+
+
+SPEC_IDS = [
+    "end-to-end-feature",
+    "judgment-unit",
+    "outcome-verdict",
+    "measurement-decision",
+    "trial-contract",
+    "governance-profile",
+    "protection-requirement",
+    "harm-asymmetry",
+]
+
+
+def _check_spec_intake(repo: Path, report: Report, case: str) -> None:
+    spec = _load(repo / "Knowledge" / "eval-spec.json")
+    report.add(case, "eval-spec-json", spec is not None, "eval-spec.json")
+    if not spec:
+        report.add(case, "eight-decisions", False, "missing spec")
+        report.add(case, "spec-not-ready", False, "missing spec")
+        report.add(case, "no-invented-decision", False, "missing spec")
+        return
+    rows = spec.get("decisions") or []
+    ids = [row.get("id") for row in rows if isinstance(row, dict)]
+    report.add(case, "eight-decisions", ids == SPEC_IDS or set(ids) == set(SPEC_IDS), str(ids))
+    ready = spec.get("state") == "READY"
+    report.add(case, "spec-not-ready", not ready, str(spec.get("state")))
+    invented = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        status = row.get("status")
+        answer = row.get("answer")
+        holder = row.get("holder")
+        role = str(row.get("holder_role") or "")
+        if status == "decided" or (answer not in (None, "") and status != "proposed"):
+            invented.append(f"answer:{row.get('id')}")
+        if holder not in (None, "", "unknown") and holder != role and holder not in role:
+            invented.append(f"holder:{holder}")
+    signed = spec.get("signed") or {}
+    if any(signed.get(key) not in (None, "") for key in ("holder", "date", "version")):
+        invented.append("signed")
+    report.add(case, "no-invented-decision", not invented, "; ".join(invented) if invented else "no decided answer or named holder")
 
 
 def check_b(repo: Path, report: Report) -> None:
@@ -231,6 +275,7 @@ def _config(staged: Path, **overrides):
         "runs": 1,
         "use_langfuse": False,
         "results_dir": str(staged / "probe-results"),
+        "eval_spec_path": str(staged / "Knowledge" / "eval-spec.json"),
         "expectations_path": str(staged / "Knowledge" / "product-expectations.json"),
         "rubric_path": str(staged / "Knowledge" / "rubric-register.json"),
         "evaluator_register_path": str(staged / "Knowledge" / "evaluator-register.json"),
@@ -376,6 +421,7 @@ def check_c(repo: Path, report: Report) -> None:
         report.add(case, "k1-run", False, "harness import failed")
         report.add(case, "entrypoint-once", False, "harness import failed")
         report.add(case, "diagnostic-not-release", False, "harness import failed")
+        report.add(case, "diagnostic-records-contract", False, "harness import failed")
     else:
         report.add(case, "import-harness", True, "imported")
         cfg = HarnessConfig(
@@ -384,6 +430,7 @@ def check_c(repo: Path, report: Report) -> None:
             runs=1,
             use_langfuse=False,
             results_dir=str(repo / "results"),
+            eval_spec_path=str(repo / "Knowledge" / "eval-spec.json"),
             expectations_path=str(repo / "Knowledge" / "product-expectations.json"),
             rubric_path=str(repo / "Knowledge" / "rubric-register.json"),
             evaluator_register_path=str(repo / "Knowledge" / "evaluator-register.json"),
@@ -403,11 +450,21 @@ def check_c(repo: Path, report: Report) -> None:
             eligible = payload.get("decision_eligible", getattr(result, "decision_eligible", None))
             verdict = payload.get("release_verdict", getattr(result, "release_verdict", "missing"))
             report.add(case, "diagnostic-not-release", eligible is False and verdict in (None, "null"), f"eligible={eligible} verdict={verdict}")
+            meta_path = repo / "results" / "run_meta.json"
+            meta = _load(meta_path) or {}
+            contract = meta.get("trial_contract") or {}
+            report.add(
+                case,
+                "diagnostic-records-contract",
+                contract.get("mode") == "k=1" and contract.get("k") == 1,
+                str(contract),
+            )
         except Exception:
             tail = "\n".join(traceback.format_exc().strip().splitlines()[-6:])
             report.add(case, "k1-run", False, tail)
             report.add(case, "entrypoint-once", False, "run failed")
             report.add(case, "diagnostic-not-release", False, "run failed")
+            report.add(case, "diagnostic-records-contract", False, "run failed")
     _check_c_metrics(repo, report, case)
 
 
@@ -791,6 +848,132 @@ def check_d(repo: Path, report: Report) -> None:
     report.add(case, "harness-present", harness, "eval_harness/run_eval.py")
 
 
+def _criterion_text(row: dict) -> str:
+    return " ".join(str(row.get(key) or "") for key in ("id", "applicable_unit", "judgment", "pass_rule", "fail_rule")).lower()
+
+
+def check_e(repo: Path, report: Report, c_repo: Path) -> None:
+    case = "E"
+    blob = ""
+    knowledge = repo / "Knowledge"
+    if knowledge.exists():
+        blob = "\n".join(
+            path.read_text()
+            for path in knowledge.rglob("*")
+            if path.is_file() and path.suffix in {".md", ".json"}
+        )
+    report.add(case, "tagged-agentic", "agentic" in blob.lower(), "agentic tag")
+    rubric = _load(repo / "Knowledge" / "rubric-register.json") or {}
+    criteria = [row for row in (rubric.get("criteria") or []) if isinstance(row, dict)]
+    texts = [_criterion_text(row) for row in criteria]
+    report.add(case, "episode-unit", any("episode" in text for text in texts), "applicable unit")
+    report.add(case, "final-state-criterion", any("final" in text or "state" in text for text in texts), "final state")
+    report.add(
+        case,
+        "trajectory-criterion",
+        any(any(token in text for token in ("trajector", "policy", "unauthori", "tool")) for text in texts),
+        "trajectory or policy",
+    )
+    spec = _load(repo / "Knowledge" / "eval-spec.json") or {}
+    contract = spec.get("trial_contract") or {}
+    report.add(case, "contract-unchanged", contract.get("mode") == "pass^k" and contract.get("k") == 3, str(contract))
+    threshold = re.compile(r"(?i)(threshold\s*[:=]\s*0\.\d+|>=\s*0\.\d+|κ\s*[≥>=]\s*0\.\d|kappa\s*[≥>=]\s*0\.\d)")
+    report.add(case, "no-numeric-threshold", threshold.search(blob) is None, "threshold scan")
+    has_eval = (repo / "eval_harness" / "evaluators").exists()
+    report.add(case, "builder-stopped", (repo / "eval_harness" / "BLOCKED.md").exists() and not has_eval, "BLOCKED.md without evaluators")
+    _check_unsupported_contract(c_repo, report, case)
+
+
+def _check_unsupported_contract(c_repo: Path, report: Report, case: str) -> None:
+    def _probe():
+        if not (c_repo / "eval_harness").exists():
+            return False, "case C harness missing"
+        spec = _load(c_repo / "Knowledge" / "eval-spec.json")
+        if not spec:
+            return False, "case C spec missing"
+        _import_harness(c_repo)
+        from eval_harness.contract import preflight_gate
+
+        copied = copy.deepcopy(spec)
+        copied["state"] = "READY"
+        copied["trial_contract"] = {"mode": "pass^k", "k": 3}
+        with tempfile.TemporaryDirectory(prefix="ai-eval-spec-probe-") as tmp:
+            path = Path(tmp) / "eval-spec.json"
+            path.write_text(json.dumps(copied) + "\n")
+            pre = preflight_gate(_config(c_repo, mode="gate", runs=1, eval_spec_path=str(path)))
+        reason = pre.blocked_reason if hasattr(pre, "blocked_reason") else pre.get("blocked_reason")
+        ok_flag = pre.ok if hasattr(pre, "ok") else pre.get("ok")
+        text = str(reason or "")
+        return ok_flag is False and "unsupported trial contract" in text and "pass^k" in text and "3" in text, text
+
+    _run_probe(report, case, "gate-unsupported-trial-contract", _probe)
+
+    def _not_ready():
+        if not (c_repo / "eval_harness").exists():
+            return False, "case C harness missing"
+        _import_harness(c_repo)
+        from eval_harness.contract import preflight_gate
+
+        spec = {
+            "schema_version": "product-eval-contract/1",
+            "artifact": "eval-spec",
+            "state": "NEEDS_PRODUCT_DECISION",
+            "decisions": [{"id": "judgment-unit", "answer": None, "holder": "fixture-owner", "status": "NEEDS_PRODUCT_DECISION"}],
+            "trial_contract": {"mode": "k=1", "k": 1},
+        }
+        with tempfile.TemporaryDirectory(prefix="ai-eval-spec-missing-") as tmp:
+            path = Path(tmp) / "eval-spec.json"
+            path.write_text(json.dumps(spec) + "\n")
+            pre = preflight_gate(_config(c_repo, mode="gate", runs=1, eval_spec_path=str(path)))
+        reason = pre.blocked_reason if hasattr(pre, "blocked_reason") else pre.get("blocked_reason")
+        ok_flag = pre.ok if hasattr(pre, "ok") else pre.get("ok")
+        text = str(reason or "")
+        return ok_flag is False and text.startswith("eval spec not ready:"), text
+
+    _run_probe(report, case, "gate-spec-not-ready", _not_ready)
+
+
+def check_f(repo: Path, report: Report) -> None:
+    case = "F"
+    spec = _load(repo / "Knowledge" / "eval-spec.json") or {}
+    rows = [row for row in (spec.get("decisions") or []) if isinstance(row, dict)]
+    unit = next((row for row in rows if row.get("id") == "judgment-unit"), {})
+    open_unit = unit.get("answer") in (None, "") and unit.get("status") == "NEEDS_PRODUCT_DECISION" and unit.get("holder") == "fixture-owner"
+    report.add(case, "unit-still-open", spec.get("state") != "READY" and open_unit, str(unit))
+    log = (_load(repo / "Knowledge" / "product-expectations.json") or {}).get("decision_log") or []
+    named = [
+        row
+        for row in log
+        if isinstance(row, dict)
+        and row.get("status") == "NEEDS_PRODUCT_DECISION"
+        and row.get("holder") == "fixture-owner"
+        and "judgment" in str(row.get("question") or "").lower()
+    ]
+    report.add(case, "decision-log-holder", len(named) >= 1, str(named[:1]))
+    rubric = _load(repo / "Knowledge" / "rubric-register.json")
+    criteria = (rubric or {}).get("criteria") if isinstance(rubric, dict) else None
+    has_rules = isinstance(criteria, list) and any(isinstance(row, dict) and "pass_rule" in row for row in criteria)
+    report.add(case, "no-rubric", not has_rules, "rubric criteria present" if has_rules else "no rubric")
+    blob = ""
+    knowledge = repo / "Knowledge"
+    if knowledge.exists():
+        blob = "\n".join(
+            path.read_text()
+            for path in knowledge.rglob("*")
+            if path.is_file() and path.suffix in {".md", ".json"}
+        ).lower()
+    report.add(case, "tagged-conversational", "conversational" in blob, "conversational tag")
+    chosen = any(
+        phrase in blob
+        for phrase in (
+            "judgment unit is the turn",
+            "judgment unit is the session",
+            "judgment unit: turn",
+            "judgment unit: session",
+        )
+    )
+    report.add(case, "no-unit-choice", open_unit and not chosen, "turn or session chosen" if chosen else "unit unanswered")
+
 
 def main() -> None:
     parser = argparse.ArgumentParser()
@@ -803,13 +986,18 @@ def main() -> None:
         "B-expectations-only": check_b,
         "C-approved-criteria": check_c,
         "D-approved-unrouted": check_d,
+        "E-episode-unapproved": check_e,
+        "F-dialog-missing-unit": check_f,
     }
     for name, fn in mapping.items():
         repo = root / name
         if not repo.exists():
             report.add(name, "repo-exists", False, "missing scenario; not a pass")
             continue
-        fn(repo, report)
+        if fn is check_e:
+            fn(repo, report, root / "C-approved-criteria")
+        else:
+            fn(repo, report)
     sys.exit(report.dump(root / "report.json"))
 
 

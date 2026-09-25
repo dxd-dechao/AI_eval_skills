@@ -385,11 +385,270 @@ D_RUBRIC = {
     },
 }
 
+def _decision(decision_id, question, answer, holder, holder_role, status="decided"):
+    return {
+        "id": decision_id,
+        "question": question,
+        "answer": answer,
+        "holder": holder,
+        "holder_role": holder_role,
+        "status": status,
+        "source": "fixture eval spec",
+    }
+
+
+def _ready_spec(feature, judgment, mode="k=1", k=1):
+    """Complete READY Eval Spec. Trial contract is the only part that varies."""
+    decisions = [
+        _decision(
+            "end-to-end-feature",
+            "What complete user-facing behavior will this Eval Spec evaluate for one launch decision?",
+            feature,
+            "fixture-pm",
+            "Product/domain owner",
+        ),
+        _decision(
+            "judgment-unit",
+            "What is one artifact being judged (output, passage, rubric dimension, turn, session, or task episode), and what makes it pass?",
+            judgment,
+            "fixture-pm",
+            "Product/domain; the named expert resolves semantic boundaries",
+        ),
+        _decision(
+            "outcome-verdict",
+            "What outcome decides pass, and which architecture-derived checks materially help locate failure?",
+            "The user-facing outcome in the judgment unit passes or fails. Extra checks only locate failure.",
+            "fixture-pm",
+            "Product/domain + named expert",
+        ),
+        _decision(
+            "measurement-decision",
+            "What decision does each measurement drive: ship gate, alarm, or research insight?",
+            "Ship gate for the outcome verdict. No research-only metric.",
+            "fixture-pm",
+            "Product/domain; policy/governance authorizes consequential use",
+        ),
+        _decision(
+            "trial-contract",
+            "Is one attempt the promise, or are several attempts part of the experience, and which of k=1, pass^k, or pass@k is recorded, with what k?",
+            f"{mode} with k={k}. Record per-trial success. Do not compare across k.",
+            "fixture-pm",
+            "Product/domain",
+        ),
+        _decision(
+            "governance-profile",
+            "Which governance profile applies, what minimum evidence and protection obligations does it impose, and who may approve launch, controlled evidence accrual, a waiver, or an external claim?",
+            "Internal tool profile. fixture-gov may approve launch. Obligations are evidence minimums only.",
+            "fixture-gov",
+            "Policy/governance",
+        ),
+        _decision(
+            "protection-requirement",
+            "For each material risk, what must be prevented before it takes effect, and what may be detected or reviewed later?",
+            "A wrong user-facing outcome must be caught before release. Later review is allowed for diagnostic detail.",
+            "fixture-pm",
+            "Product/domain defines harm; policy/governance sets the minimum",
+        ),
+        _decision(
+            "harm-asymmetry",
+            "For each criterion or risk, which error is worse, a miss or a false alarm?",
+            "A miss of a wrong user-facing outcome is worse than a false alarm. Operating points are not set here.",
+            "fixture-pm",
+            "Product/domain; policy/governance constrains consequential risks",
+        ),
+    ]
+    return {
+        "schema_version": "product-eval-contract/1",
+        "artifact": "eval-spec",
+        "state": "READY",
+        "display_state": "Eval Spec ready",
+        "feature_id": "fixture-feature",
+        "decisions": decisions,
+        "trial_contract": {"mode": mode, "k": k},
+        "signed": {"holder": "fixture-pm", "date": "2026-09-25", "version": "1"},
+    }
+
+
+def _spec_missing_unit():
+    """READY-shaped spec with the judgment-unit answer absent and its holder named."""
+    spec = _ready_spec("A person exchanges a series of messages and receives replies.", None)
+    spec["state"] = "NEEDS_PRODUCT_DECISION"
+    spec["display_state"] = "BLOCKED — Product decision required"
+    spec["trial_contract"] = {"mode": None, "k": None}
+    spec["signed"] = {"holder": None, "date": None, "version": None}
+    for row in spec["decisions"]:
+        if row["id"] == "judgment-unit":
+            row["answer"] = None
+            row["holder"] = "fixture-owner"
+            row["status"] = "NEEDS_PRODUCT_DECISION"
+        if row["id"] == "trial-contract":
+            row["answer"] = None
+            row["status"] = "NEEDS_PRODUCT_DECISION"
+            row["holder"] = "unknown"
+    return spec
+
+
+AGENT_APP = '''\
+"""Small tool-using fixture. Two tools, then a final state."""
+
+from pathlib import Path
+
+_COUNTER = Path(__file__).with_name("invocation_count")
+ALLOWED = {"acme", "northwind"}
+
+
+def _bump() -> int:
+    n = int(_COUNTER.read_text()) if _COUNTER.exists() else 0
+    n += 1
+    _COUNTER.write_text(str(n))
+    return n
+
+
+def lookup_vendor(name: str) -> dict:
+    return {"vendor": name, "approved": name.lower() in ALLOWED}
+
+
+def place_order(vendor: str, sku: str, qty: int) -> dict:
+    return {"order_id": f"{vendor}-{sku}", "vendor": vendor, "sku": sku, "qty": qty}
+
+
+def run_task(request: str) -> dict:
+    """Production entrypoint. One call increments the counter by one."""
+    calls = _bump()
+    text = request.strip()
+    vendor = "acme" if "acme" in text.lower() else "other"
+    looked = lookup_vendor(vendor)
+    trajectory = [{"tool": "lookup_vendor", "args": {"name": vendor}, "result": looked}]
+    order = None
+    if looked["approved"]:
+        order = place_order(vendor, "sku-1", 1)
+        trajectory.append({"tool": "place_order", "args": {"vendor": vendor, "sku": "sku-1", "qty": 1}, "result": order})
+    return {
+        "final_state": {"order": order, "vendor_approved": looked["approved"]},
+        "trajectory": trajectory,
+        "invocation_count": calls,
+    }
+'''
+
+CHAT_APP = '''\
+"""Small multi-message fixture."""
+
+from pathlib import Path
+
+_COUNTER = Path(__file__).with_name("invocation_count")
+
+
+def _bump() -> int:
+    n = int(_COUNTER.read_text()) if _COUNTER.exists() else 0
+    n += 1
+    _COUNTER.write_text(str(n))
+    return n
+
+
+def continue_dialog(history: list, message: str) -> dict:
+    """Production entrypoint. One call increments the counter by one."""
+    calls = _bump()
+    prior = list(history or [])
+    reply = message.strip()[:80]
+    prior.append({"speaker": "person", "text": message})
+    prior.append({"speaker": "assistant", "text": reply})
+    return {"history": prior, "reply": reply, "invocation_count": calls}
+'''
+
+E_EXPECTATIONS = {
+    "schema_version": "product-eval-contract/1",
+    "artifact": "product-expectations",
+    "state": "RUBRIC_REVIEW",
+    "display_state": "Expectations supplied — rubric not approved",
+    "inventory": [
+        {
+            "id": "mode-task",
+            "version": "observed-1",
+            "mode": "run_task",
+            "output": "final_state and trajectory",
+            "source": "app/worker.py:run_task",
+        }
+    ],
+    "applicability_map": [
+        {
+            "id": "app-task",
+            "output": "final_state and trajectory",
+            "candidate_behaviour": "The caller can see the resulting state and the tools that ran",
+            "product_story": "A person asks for a vendor order and receives the result",
+            "precondition": "Request text is non-empty",
+            "status": "in_scope",
+        }
+    ],
+    "story_packet": [
+        {
+            "id": "story-task",
+            "source": "fixture expectations",
+            "scenario": "One request is handled through the available tools",
+            "judgment_unit": "One task episode",
+            "named_expert": "fixture-expert",
+            "exclusions": [],
+            "open_decisions": [],
+        }
+    ],
+    "decision_log": [
+        {
+            "id": "dec-feature",
+            "question": "Which user-facing behavior is in this launch?",
+            "holder": "fixture-pm",
+            "decision": "Vendor order requests handled by run_task.",
+            "status": "decided",
+            "source": "fixture expectations",
+        }
+    ],
+    "observed_facts": [],
+}
+
+F_EXPECTATIONS = {
+    "schema_version": "product-eval-contract/1",
+    "artifact": "product-expectations",
+    "state": "RUBRIC_REVIEW",
+    "display_state": "Expectations supplied — rubric not approved",
+    "inventory": [
+        {
+            "id": "mode-dialog",
+            "version": "observed-1",
+            "mode": "continue_dialog",
+            "output": "history and reply",
+            "source": "app/dialog.py:continue_dialog",
+        }
+    ],
+    "applicability_map": [
+        {
+            "id": "app-dialog",
+            "output": "history and reply",
+            "candidate_behaviour": "The person receives a reply that stays on the message they sent",
+            "product_story": "A person sends several messages and receives replies",
+            "precondition": "Message text is non-empty",
+            "status": "in_scope",
+        }
+    ],
+    "story_packet": [
+        {
+            "id": "story-dialog",
+            "source": "fixture expectations",
+            "scenario": "Several messages in one exchange",
+            "judgment_unit": "",
+            "named_expert": "fixture-expert",
+            "exclusions": [],
+            "open_decisions": ["What one artifact is judged"],
+        }
+    ],
+    "decision_log": [],
+    "observed_facts": [],
+}
+
 PROMPTS = {
     "A": "Design an eval for this app and build the harness.\n",
     "B": "Design an eval for this app and build the harness.\n",
     "C": "Design an eval for this app and build the harness.\n",
     "D": "Design an eval for this app and build the harness.\n",
+    "E": "Design an eval for this app and build the harness.\n",
+    "F": "Design an eval for this app and build the harness.\n",
 }
 PLUMBING_PROMPT = "Please add neutral execution plumbing so we can call the app and save local results.\n"
 
@@ -419,10 +678,22 @@ def _base_app(repo: Path) -> None:
     )
 
 
+def _write_spec(repo: Path, spec: dict) -> None:
+    _write(repo / "Knowledge" / "eval-spec.json", json.dumps(spec, indent=2) + "\n")
+    _write(
+        repo / "Knowledge" / "eval-spec.md",
+        "# Fixture Eval Spec\n\nSee eval-spec.json. Do not change a supplied trial contract.\n",
+    )
+
+
 def prepare(root: Path) -> None:
     if root.exists() and any(root.iterdir()):
         sys.exit(f"refusing nonempty target: {root}")
     root.mkdir(parents=True, exist_ok=True)
+    k1 = _ready_spec(
+        "Summarize one document into the returned dict.",
+        "The dict returned by summarize",
+    )
     specs = {
         "A-missing-expectations": ("A", False, False),
         "B-expectations-only": ("B", True, False),
@@ -467,8 +738,56 @@ def prepare(root: Path) -> None:
             _write(repo / "Knowledge" / "evaluator-register.json", json.dumps(ROUTES, indent=2) + "\n")
             _write(repo / "Knowledge" / "dev_manifest.json", json.dumps(DEV_MANIFEST, indent=2) + "\n")
             _write(repo / "Knowledge" / "heldout_manifest.json", json.dumps(HELD_MANIFEST, indent=2) + "\n")
+        if expectations:
+            _write_spec(repo, k1)
         _write(repo / "INPUT_MANIFEST.json", json.dumps(manifest, indent=2) + "\n")
         _git_init(repo)
+
+    episode = _ready_spec(
+        "A person asks for a vendor order and receives the result.",
+        "One task episode",
+        mode="pass^k",
+        k=3,
+    )
+    e_repo = root / "E-episode-unapproved"
+    _write(e_repo / "app" / "worker.py", AGENT_APP)
+    _write(e_repo / "app" / "__init__.py", "")
+    _write(
+        e_repo / "README.md",
+        "# Order helper\n\nCallable entrypoint: `app.worker.run_task(request: str) -> dict`.\n",
+    )
+    _write(e_repo / "PROMPT.md", PROMPTS["E"])
+    _write(e_repo / "Knowledge" / "product-expectations.json", json.dumps(E_EXPECTATIONS, indent=2) + "\n")
+    _write(
+        e_repo / "Knowledge" / "product-expectations.md",
+        "# Fixture expectations\n\nSee product-expectations.json.\n",
+    )
+    _write_spec(e_repo, episode)
+    _write(
+        e_repo / "INPUT_MANIFEST.json",
+        json.dumps({"case": "E-episode-unapproved", "prompt": "PROMPT.md", "entrypoint": "app.worker.run_task"}, indent=2) + "\n",
+    )
+    _git_init(e_repo)
+
+    f_repo = root / "F-dialog-missing-unit"
+    _write(f_repo / "app" / "dialog.py", CHAT_APP)
+    _write(f_repo / "app" / "__init__.py", "")
+    _write(
+        f_repo / "README.md",
+        "# Dialog helper\n\nCallable entrypoint: `app.dialog.continue_dialog(history: list, message: str) -> dict`.\n",
+    )
+    _write(f_repo / "PROMPT.md", PROMPTS["F"])
+    _write(f_repo / "Knowledge" / "product-expectations.json", json.dumps(F_EXPECTATIONS, indent=2) + "\n")
+    _write(
+        f_repo / "Knowledge" / "product-expectations.md",
+        "# Fixture expectations\n\nSee product-expectations.json.\n",
+    )
+    _write_spec(f_repo, _spec_missing_unit())
+    _write(
+        f_repo / "INPUT_MANIFEST.json",
+        json.dumps({"case": "F-dialog-missing-unit", "prompt": "PROMPT.md", "entrypoint": "app.dialog.continue_dialog"}, indent=2) + "\n",
+    )
+    _git_init(f_repo)
     print(root)
 
 

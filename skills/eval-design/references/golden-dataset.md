@@ -93,11 +93,28 @@ Adapt fields to the domain (timestamps for video/audio, spans for text, regions 
 
 **Dataset versioning:** the dataset carries a version (content hash or tag) that changes whenever items are added, removed, or re-labeled. Eval runs record this version (see eval-plan 3H, run provenance).
 
+## 4B-arch. Archetype composition
+
+Use the Step 1 archetype tag. One item, the ground truth, and the synthetic-data rule depend on the tag. Development and held-out manifests stay disjoint for every archetype, including sessions and trajectories: no shared item id, session id, or trajectory id, and no shared content.
+
+| Archetype | One item | Ground truth | Synthetic data |
+|-----------|----------|--------------|----------------|
+| Classification | One output (clip, event, or labelled item) | Labels on the Eval Spec's unit | Cannot fill real positives or be the substrate for a reported recall. Allowed only as a reversible shadow, never as the benchmark. |
+| Open-ended generative | One generated passage | Reference-free binary claims judged by the named expert. No single reference output. | Not a substitute for expert claims on the held-out set. |
+| Rubric scoring | One artifact per ordinal rubric dimension | Expert judgments on the band, with score-band and boundary coverage | Not the expert-label source. |
+| Conversational | One turn or one session, matching the Eval Spec | Expert judgments on that unit. Turn labels are not session labels. | A scripted session is not held-out evidence for a session outcome. |
+| Agentic | One task episode (trajectory plus final state) | Final-state checks against a declared state, plus policy judgments over the whole trajectory | A constructed world state can host the episode. It does not replace a held-out episode the development set already used. |
+
 ## 4F. Matching logic
 
-Define what counts as a "match" between system output and ground truth:
+### Classification
+
+This matching logic is the classification archetype. Define what counts as a match between system output and ground truth:
+
 - Same event type
 - Overlap within tolerance. **Justify the tolerance in user-utility terms** — "would a human find the relevant content by navigating to this point?" — even when aligning with an existing implementation's threshold. If an implementation threshold already exists in the codebase, state both the alignment and the user-utility rationale.
+
+For the other archetypes, a match is the criterion's Pass rule on the Eval Spec's unit: a binary claim for open-ended generative output, an expert band for ordinal rubric scoring, the turn or session outcome for conversational output, and final state plus trajectory policy for an agentic episode. Do not force event-overlap matching onto those units.
 
 ## 4G. Metrics
 

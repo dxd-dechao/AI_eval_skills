@@ -3,10 +3,11 @@ name: eval-harness-build
 description: >-
   Generate a Python eval harness from an approved rubric and evaluator
   register: route-specific deterministic, human, and optional LLM evaluators,
-  fail-closed decision gates, and a diagnostic-by-default notebook. Stops with
-  an actionable blocker when Product expectations or rubric approval are
-  missing. Use when the user asks to build, scaffold, or implement an eval
-  harness, eval runner, or golden-eval notebook.
+  fail-closed decision gates, and a diagnostic-by-default notebook. Gate mode
+  also requires a READY Eval Spec whose trial contract is k=1 with runs 1.
+  Stops with an actionable blocker when the Eval Spec, Product expectations,
+  or rubric approval are missing. Use when the user asks to build, scaffold,
+  or implement an eval harness, eval runner, or golden-eval notebook.
 ---
 
 # Eval harness builder
@@ -32,6 +33,7 @@ Neutral execution plumbing (adapter, local writer, config shell, no evaluators) 
 
 Look in `Knowledge/` (or the project's docs directory) for:
 
+- `eval-spec.json` (`schema_version` `product-eval-contract/1`)
 - `product-expectations.json` (`schema_version` `product-eval-contract/1`)
 - `rubric-register.json`
 - `evaluator-register.json` when the rubric claims approval
