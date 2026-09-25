@@ -112,7 +112,7 @@ Spell out the audit loop (load sampled trace/case → run judge with the product
 ## 6G. Judge execution
 
 - **Where the judge runs:** in the harness whenever the judge input includes a non-text modality (video, audio, images) or ground-truth files — Langfuse-managed evaluators operate on trace text and cannot execute those. Text-only judges *may* run as managed evaluators; state the choice per judge. Langfuse stores judge scores; for multimodal judges it never executes them.
-- **Deterministic derivation:** judge output is strict JSON (validated); all judge-derived metrics are computed by harness code from that JSON — the judge never computes a metric itself. This holds whether the eval plan defines one unified judge or per-dimension judges.
+- **Deterministic derivation:** judge output is strict JSON (validated); all judge-derived metrics are computed by harness code from that JSON — the judge never computes a metric itself. This holds for every LLM route; each approved criterion has its own route and version, and an unaccepted route stays diagnostic.
 - **Canonical naming registry:** 5D is the score registry of record; this section restates only the rules — `eval_*`/`ground_truth_*` require labels; proxy names for Mode 3; one canonical name per dimension (no synonyms drifting between docs); judge rationale attached as the Langfuse score **comment**, not a separate score.
 
 ## 6H. Aggregates, gates, and CI
