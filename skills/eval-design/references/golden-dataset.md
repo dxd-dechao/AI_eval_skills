@@ -1,6 +1,21 @@
-# Step 4: Generate golden dataset spec
+# Step 4: Dataset spec
 
-Produce a golden dataset spec document (`4. golden-dataset-spec.md`) with sections 4A–4K.
+Write this document only after a rubric version is approved. Otherwise stop at the intake or rubric-review packet.
+
+Two datasets stay separate:
+
+- **Development** — examples used to draft and revise criteria. ID, version, and membership manifest required.
+- **Held-out validation** — fresh expert labels for evaluator acceptance. Different ID, version, and manifest. Reject any shared item id or content. If a held-out item informs a revision, move it to development and collect a new held-out set.
+
+Human annotation and adjudication apply to labels people own. Record evidence status (`applicable`, `not_applicable`, `UNSCORABLE`) per item. Unknown applicability is unscorable, not an automatic exclusion from the story.
+
+Do not treat a generated label as approval. Do not reuse development items as held-out acceptance evidence.
+
+Lifecycle: version the manifest when membership changes; record provenance; quarantine contaminated or overlapping items instead of silently keeping them.
+
+Produce `4. golden-dataset-spec.md` with sections 4A–4K when the rubric is approved.
+
+**Generation tasks still use binary decision criteria** when the approved rubric says Pass/Fail. An ordinal measure is allowed only when the approved product contract defines one. The composition patterns below are illustrations, not permission to drop a binary criterion.
 
 **Mandatory-content rule.** Every section below is required unless a Step 1/2 verdict prunes it; pruned sections must say **"N/A — [reason]"** in place, never be silently dropped.
 
@@ -19,7 +34,7 @@ Determine the segment split based on the **goal of the AI system being evaluated
 | **Safety-critical detection** (e.g., fights, weapons, medical emergencies) | Heavy negatives (60%+), moderate positives, moderate edge cases | False positives erode trust but false negatives are dangerous — need both strong recall AND precision |
 | **High-volume classification** (e.g., ticket routing, content moderation) | Balanced positives across categories, moderate negatives, heavy edge cases (30%+) | The system sees many true positives daily — the hard part is distinguishing between similar categories |
 | **Rare event detection** (e.g., fraud, anomalies, defects) | Very heavy negatives (70%+), small but sufficient positives, targeted edge cases | Mirrors production reality where 99% of inputs are normal — precision on the rare positives matters most |
-| **Generation/creative tasks** (e.g., essay feedback, summarization, recommendations) | Diverse inputs covering the full difficulty range, fewer "negatives" (may not apply), heavy edge cases | No binary correct/wrong — evaluation is about quality gradients across input types |
+| **Generation/creative tasks** (e.g., essay feedback, summarization, recommendations) | Diverse inputs covering the full difficulty range, boundary cases for each atomic criterion | Each approved criterion is still Pass/Fail on its unit; gradients are not the decision metric unless the approved contract is ordinal |
 | **Multi-step reasoning** (e.g., diagnosis, investigation, planning) | Moderate positives with varying complexity levels, edge cases that test reasoning boundaries | The system needs to handle simple AND complex cases — composition should stratify by difficulty |
 
 **The agent should:**
@@ -103,8 +118,8 @@ All reported per scenario dimension (or per real variation axis if no scenario d
 - Representative of production conditions (camera angle, resolution, format, etc.)
 - Unambiguous ground truth — with this default adjudication procedure (adapt thresholds only with justification):
   1. Edge-case and adversarial items are **double-labeled** by independent annotators.
-  2. Compute inter-annotator agreement (Cohen's kappa for categorical labels).
-  3. Kappa ≥ 0.6 → keep, record kappa on the item. Below 0.6 → a third senior annotator adjudicates; if still unresolved, exclude the item (ambiguous ground truth poisons the benchmark).
+  2. Record agreement between annotators in the form the label regime needs. Do not apply a universal kappa cutoff invented here.
+  3. Disagreements go to the named adjudicator. Unresolved items stay unscorable or out of the set; they are not silent passes.
   4. A random 10% of single-labeled positives/negatives are also double-labeled as a drift check on annotation quality.
 - Privacy/anonymization requirements met
 
