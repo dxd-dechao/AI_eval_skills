@@ -2,17 +2,27 @@
 
 Two skills that take an AI/LLM project from Product expectations through an approved rubric to a fail-closed eval harness. They stop when the next decision is not in evidence. They do not invent Product intent, approvers, or thresholds.
 
+The sequence follows the Eval Playbook's Product-to-evaluation bridge (Stage 00 and Stage 03): Product supplies expectations → atomic binary rubric → Product/domain and named-expert approval → one evaluator per accepted criterion → evaluator verification → decision use.
+
 ## Skills
 
 ### 1. `eval-design` — Generate the eval design
 
-Point it at a repo root. What it writes depends on readiness. Product/domain supplies expectations (the PM coordinates). Data science or the AI drafter writes atomic binary criteria. Product/domain and the named expert test, approve, and version the rubric. Each approved criterion chooses a deterministic check, a named human review, or an optional LLM evaluator. That evaluator is accepted separately before it can support a decision.
+Point it at a repo root. What it writes depends on readiness. Product/domain supplies expectations (the PM coordinates). Data science or the AI drafter writes atomic binary criteria. Product/domain and the named expert test, approve, and version the rubric. Each approved criterion gets its own evaluator route:
+
+- **Deterministic** — fully specified and machine-observable
+- **Named expert** — interpretive, evolving, rare, or needing named accountability
+- **Optional LLM** — interpretive, stable, and repeated at scale (with a stated volume reason)
+
+That evaluator is accepted separately, with its own evidence, before it can support a decision.
 
 | State | What you get |
 |-------|----------------|
 | No usable Product expectations | Intake (`product-expectations.md` + JSON) marked **BLOCKED — Product decision required**, plus factual architecture notes. No rubric, judge, threshold, or gate. |
 | Expectations supplied, rubric not approved | Candidate binary criteria and a review packet. Stops before evaluators. |
 | Rubric approved | Per-criterion routes, dataset split, Langfuse registry, harness spec, HTML. Unaccepted evaluators stay diagnostic. |
+
+Each state writes readable Markdown beside a JSON register the harness can validate: `product-expectations.json`, `rubric-register.json`, `evaluator-register.json`, plus separately versioned development and held-out manifests.
 
 Factual architecture documents (when code is explored):
 
@@ -40,10 +50,13 @@ Invariants: diagnostic success can exit 0 with `decision_eligible=false`; gate m
 
 ## Key design principles
 
+- **Product first** — Product/domain owns intended behaviour; missing decisions are recorded as `NEEDS_PRODUCT_DECISION` with a named holder, never filled in by the skill
+- **Rubric before evaluator** — approving a rubric and accepting an evaluator are two separate checks; development examples are never reused as held-out validation
+- **Fail closed** — diagnostic runs never produce a release verdict; gate mode refuses missing approval, versions, or evidence before scoring
 - **Adaptive, not templated** — classifies each system on pipeline shape (single-stage vs multi-stage) and scenario dimensions, then expands or prunes sections accordingly
 - **Never a single aggregate** — metrics are always stratified by the real variation axis
 - **Cross-document consistency** — shared numbers, axes, and pipeline stages are verified across all six deliverables
-- **Safety and fairness built in** — untrusted-input tier, demographic axes, and costly failure direction are identified from code and carry through to eval gates and dataset segments
+- **Safety and fairness built in** — untrusted-input tier, demographic axes, and costly failure direction are identified from code and carry through to candidate criteria and dataset segments; any gate on them needs a Product-approved rule
 
 ## Best fit
 
@@ -92,9 +105,14 @@ skills/
   eval-harness-build/
     SKILL.md                    # Skill definition and workflow
     references/
-      modules.md                # Module specs (adapter, judge, metrics, gates, writer)
+      modules.md                # Module specs (contract preflight, routing, evaluators, metrics, gates, writer)
       notebook.md               # Notebook generation spec
+tests/forward/                  # Forward checks: prepare temp repos, verify generated artifacts
+  README.md
+  prepare_cases.py              # Cases A–D (no expectations, unapproved, approved, unrouted)
+  verify_cases.py
 sample docs/                    # Example output from SmartCampus run
+  0. product-expectations-and-rubric-review.md
   1. Codebase Architecture Overview.md
   2. LLM In-Out Flow.md
   3. eval-plan-full.md
@@ -106,7 +124,7 @@ sample docs/                    # Example output from SmartCampus run
 
 ## Sample run: SmartCampus
 
-The `sample docs/` directory contains a complete end-to-end run against [SmartCampus](https://github.com/user/smartcampus) — a multi-venue school video analytics platform using Gemini for behaviour detection, D-FINE for person tracking, and InsightFace for face recognition. The run demonstrates:
+The `sample docs/` directory contains a complete end-to-end run against SmartCampus — a multi-venue school video analytics platform using Gemini for behaviour detection, D-FINE for person tracking, and InsightFace for face recognition. The run demonstrates:
 
 - Multi-stage pipeline classification (chunk → Gemini → merge → combine → summarize → embed → search)
 - Scenario dimension stratification by venue type
@@ -124,7 +142,7 @@ python3 /path/to/skill-creator/scripts/quick_validate.py skills/eval-design
 python3 /path/to/skill-creator/scripts/quick_validate.py skills/eval-harness-build
 ```
 
-Forward checks live in `tests/forward/README.md`. They prepare temporary repos and verify generated artifacts. They do not run inside this checkout.
+Forward checks live in `tests/forward/README.md`. They prepare temporary repos for four states (A no expectations, B unapproved rubric, C approved and routed, D approved but unrouted), then verify the generated artifacts and exercise the generated harness. Each probe is recorded separately; missing artifacts and errors count as failures. They do not run inside this checkout.
 
 ## How it works
 
