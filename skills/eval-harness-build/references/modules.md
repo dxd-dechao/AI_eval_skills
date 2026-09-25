@@ -26,7 +26,7 @@ eval_harness/
 
 `HarnessConfig` is a dataclass and the only place that reads environment variables.
 
-Required fields: `mode` (`"diagnostic"` default, or `"gate"`), `limit` (default 1), `runs` (default 1), `use_langfuse` (default False), `results_dir`, `expectations_path`, `rubric_path`, `evaluator_register_path`, `dataset_path`, `decision_policy` (criterion IDs the Product policy requires, copied from the register).
+Required fields: `mode` (`"diagnostic"` default, or `"gate"`), `limit` (default 1), `runs` (default 1), `use_langfuse` (default False), `results_dir`, `expectations_path`, `rubric_path`, `evaluator_register_path`, `dataset_path`, `decision_policy` (criterion IDs the Product policy requires, copied from the register), `reviews_path` (optional path to a local review file; null when absent).
 
 `validate()` collects every structural problem and raises one error. It does not judge output quality.
 
@@ -89,7 +89,7 @@ Unknown applicability serializes as `UNSCORABLE` and must not be stored as not a
 
 ## human_review.py
 
-`import_reviews(path) -> list[Review]` reads a local JSON/JSONL file. Required fields: `item_id`, `criterion_id`, `criterion_version`, `reviewer_id`, `rubric_version`, `verdict` (`Pass` or `Fail`), `evidence_note`. No network and no LLM credential. `Review.pending` is true when any required field is missing or `verdict` is not `Pass` or `Fail`. Pending rows stay pending.
+`import_reviews(path) -> list[Review]` reads a local JSON/JSONL file. A JSON array is many reviews. A JSON object with `item_id` is one review. A JSON object with a `reviews` array uses that array. JSONL is one object per line. Required fields: `item_id`, `criterion_id`, `criterion_version`, `reviewer_id`, `rubric_version`, `verdict` (`Pass` or `Fail`), `evidence_note`. No network and no LLM credential. `Review.pending` is true when any required field is missing or `verdict` is not `Pass` or `Fail`. Pending rows stay pending. Gate mode loads `config.reviews_path` through `import_reviews` and passes each row to `apply_review`. A `Fail` on a required accepted human criterion is a quality failure.
 
 ## metrics.py
 
@@ -99,7 +99,7 @@ Unknown applicability serializes as `UNSCORABLE` and must not be stored as not a
 
 An optional `criteria` map may repeat that same field set per criterion id. Top-level fields are the decision aggregate. Callers read the top-level fields; they do not have to read `criteria`.
 
-Count only scorable applicable units (`PASS` or `FAIL` with applicability `applicable`) in `denominator`. Not applicable is excluded. Unknown applicability counts as unscorable, not as not applicable. Unscorable, pending, and error counts stay visible in their own fields.
+Count every non-shadow row passed in `results`. Do not drop a row because its criterion is absent from `required_criteria`. `required_criteria` affects only `blocked_reason` and `required_shadow_ids`. Count only scorable applicable units (`PASS` or `FAIL` with applicability `applicable`) in `denominator`. Not applicable is excluded. Unknown applicability counts as unscorable, not as not applicable. Unscorable, pending, and error counts stay visible in their own fields.
 
 `pass_rate = pass_count / denominator` only when `denominator > 0` and it is not true that every required criterion is unscorable, pending, error, or missing. Otherwise `pass_rate` is null and `blocked_reason` explains why. That is not a pass.
 
@@ -111,7 +111,7 @@ Confidence intervals are computed only inside `summarize` for a declared aggrega
 
 Deterministic arithmetic (counts, overlap, IoU) is a pure function with a docstring example. Temporal overlap exists only when the criterion's evidence has intervals.
 
-Production proxy names are a separate dict and are omitted from decision metrics and baselines.
+Expose production proxy names as `PRODUCTION_PROXIES`, a dict on `metrics.py`. It may be empty. Omit those names from decision metrics and baselines.
 
 ## gates.py
 
@@ -133,7 +133,7 @@ Load local JSONL or a JSON array. `assert_held_out_disjoint(development_manifest
 
 ## langfuse_writer.py
 
-`LocalResultsWriter` writes `run_meta.json`, `items.jsonl`, `summary.json`, and `decision.json`. `run_meta.json` includes criterion versions, evaluator versions, acceptance state, provenance, `decision_eligible`, and `k`.
+`LocalResultsWriter` writes `run_meta.json`, `items.jsonl`, `summary.json`, and `decision.json`. `run_meta.json` includes criterion versions, evaluator versions, acceptance state, the accepted evidence object (including `implementation_version` when that route is deterministic), provenance, `decision_eligible`, and `k`.
 
 `make_writer(config)` returns the local writer when `use_langfuse` is false and must not import `langfuse` anywhere on that path. A Langfuse writer subclass imports `langfuse` only inside its own methods. Local files are still written.
 

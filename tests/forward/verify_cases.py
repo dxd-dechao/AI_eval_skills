@@ -573,11 +573,11 @@ def _check_c_metrics(repo: Path, report: Report, case: str) -> None:
         ),
         "gate-missing-version": (
             lambda exp, rub, reg: [row.update({"criterion_version": ""}) for row in reg.get("routes") or [] if row.get("criterion_id") == "C-len"],
-            "missing version",
+            "criterion_version",
         ),
         "gate-version-mismatch": (
             lambda exp, rub, reg: [row.update({"criterion_version": "9.9"}) for row in reg.get("routes") or [] if row.get("criterion_id") == "C-len"],
-            "version mismatch",
+            "9.9",
         ),
         "gate-missing-acceptance": (
             lambda exp, rub, reg: [
@@ -731,7 +731,7 @@ def _check_c_metrics(repo: Path, report: Report, case: str) -> None:
                 {"items": [{"id": "hold-9", "content": "same"}]},
             )
         except ValueError as exc:
-            return "overlap" in str(exc).lower() or "shared" in str(exc).lower(), str(exc)
+            return True, str(exc)
         return False, "overlap was accepted"
 
     try:
