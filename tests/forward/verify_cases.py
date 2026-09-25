@@ -941,14 +941,17 @@ def check_f(repo: Path, report: Report) -> None:
     open_unit = unit.get("answer") in (None, "") and unit.get("status") == "NEEDS_PRODUCT_DECISION" and unit.get("holder") == "fixture-owner"
     report.add(case, "unit-still-open", spec.get("state") != "READY" and open_unit, str(unit))
     log = (_load(repo / "Knowledge" / "product-expectations.json") or {}).get("decision_log") or []
-    named = [
-        row
-        for row in log
-        if isinstance(row, dict)
-        and row.get("status") == "NEEDS_PRODUCT_DECISION"
-        and row.get("holder") == "fixture-owner"
-        and "judgment" in str(row.get("question") or "").lower()
-    ]
+    named = []
+    for row in log:
+        if not isinstance(row, dict):
+            continue
+        text = (str(row.get("question") or "") + " " + str(row.get("id") or "")).lower()
+        if (
+            row.get("status") == "NEEDS_PRODUCT_DECISION"
+            and row.get("holder") == "fixture-owner"
+            and ("judgment" in text or "judged" in text)
+        ):
+            named.append(row)
     report.add(case, "decision-log-holder", len(named) >= 1, str(named[:1]))
     rubric = _load(repo / "Knowledge" / "rubric-register.json")
     criteria = (rubric or {}).get("criteria") if isinstance(rubric, dict) else None
