@@ -1,6 +1,12 @@
-# Step 5: Generate Langfuse setup
+# Step 5: Langfuse evidence design
 
-Produce a Langfuse setup document (`5. langfuse-setup.md`) with sections 5A–5K.
+Write this document only after the rubric is approved. The score registry names criterion IDs and evaluator versions. Decision scores exist only for accepted evaluators. Unaccepted routes, if traced, use a `shadow_` prefix and are not baselines.
+
+Production proxies (Mode 3) use a `proxy_` name and never reuse `eval_` / decision-metric names.
+
+Design the local writer so a total Langfuse bypass still round-trips the same evidence. Do not require a live Langfuse project to specify the registry.
+
+Produce `5. langfuse-setup.md` with sections 5A–5K.
 
 **Audience note:** this document is for a data scientist who may be new to Langfuse. Teach the vocabulary in the project's own terms before diving into structure.
 

@@ -1,169 +1,94 @@
 ---
 name: eval-harness-build
 description: >-
-  Generate a working eval-harness implementation (Python package + Mode 1
-  golden-eval Jupyter notebook) from a project's eval design docs: a pipeline
-  adapter that calls the real app, an LLM judge runner, deterministic metrics
-  with confidence intervals, ship gates on lower CI bounds, and a results sink
-  with a full Langfuse bypass. Use when the user asks to build, scaffold, or
-  implement an eval harness, eval runner, eval pipeline code, or a golden-eval
-  notebook — the implementation counterpart to the eval-design skill.
+  Generate a Python eval harness from an approved rubric and evaluator
+  register: route-specific deterministic, human, and optional LLM evaluators,
+  fail-closed decision gates, and a diagnostic-by-default notebook. Stops with
+  an actionable blocker when Product expectations or rubric approval are
+  missing. Use when the user asks to build, scaffold, or implement an eval
+  harness, eval runner, or golden-eval notebook.
 ---
 
-# Eval Harness Builder
+# Eval harness builder
 
-Turns an eval **design** (the documents produced by the `eval-design` skill —
-especially the eval plan and the eval-harness spec) into an eval
-**implementation**: a Python package under `eval_harness/` plus an interactive
-Mode 1 notebook. Invoke from the root of the project codebase.
+Turns approved evaluation design into a Python package under `eval_harness/` plus a diagnostic notebook. Invoke from the project root.
+
+This skill does not need `eval-design` to be installed. It enforces the same stop contract from the files in the target repo. Missing approval is a blocker, not a prompt to invent a rubric.
+
+Neutral execution plumbing (adapter, local writer, config shell, no evaluators) is produced only when the user explicitly asks for it despite incomplete approval. That exception never includes evaluators, judge prompts, metric thresholds, or release gates.
 
 ## Workflow
 
-Copy this checklist and track progress:
-
 ```
-- [ ] Step 1: Locate & validate the eval design docs (fallback rules below)
-- [ ] Step 2: Discover the pipeline contract from the codebase
-- [ ] Step 3: Generate the module set → read references/modules.md
-- [ ] Step 4: Generate the Mode 1 notebook → read references/notebook.md
-- [ ] Step 5: Smoke-test the offline logic — must pass before finishing
-- [ ] Step 6: README + honest handoff notes
+- [ ] Step 1: Read registers and stop if they are not ready
+- [ ] Step 2: Discover the real application entrypoint
+- [ ] Step 3: Generate modules → read references/modules.md
+- [ ] Step 4: Generate the notebook → read references/notebook.md
+- [ ] Step 5: Offline checks — must pass before finishing
+- [ ] Step 6: README with what was and was not verified
 ```
 
----
+## Step 1: Readiness
 
-## Step 1: Locate & validate the eval design docs
+Look in `Knowledge/` (or the project's docs directory) for:
 
-Search the repo (typically `docs/`) for:
+- `product-expectations.json` (`schema_version` `product-eval-contract/1`)
+- `rubric-register.json`
+- `evaluator-register.json` when the rubric claims approval
 
-- **Harness spec** (eval-design doc 6, `eval-harness.md` or similar): harness
-  modes, automation groups, Langfuse configuration, gate semantics.
-- **Eval plan** (doc 3, `eval-plan*.md`): Layer 2 metrics + targets, the
-  LLM-as-judge definition (unified or per-dimension), rubrics, harm-severity
-  tiers, statistical-rigor rules (CI methods, N-run consistency).
-- **Golden dataset spec** (doc 4): item schema, priority tiers, positive /
-  negative case definitions.
-- **Langfuse setup** (doc 5): score-name registry (5D) — the generated code
-  must emit exactly these names.
+**Stop with a blocker file** `eval_harness/BLOCKED.md` and do not generate evaluators when any of these is true:
 
-**Fallback rules — do not silently invent a design:**
+- expectations are missing, or `state` is `NEEDS_PRODUCT_DECISION`
+- rubric register is missing, or `review.approval_state` is not an approved value supplied by the source packet
+- a route is missing `criterion_id`, `criterion_version`, `evaluator_id`, `evaluator_version`, or mismatches the rubric version
+- acceptance is claimed with a bare `approved: true` / `validated: true` and no evidence record
 
-- Docs exist → extract judge schema, rubrics, metric formulas, gate thresholds,
-  and score names from them. Where the code needs a number the docs define,
-  quote the doc value and cite the section in a comment.
-- Docs partially exist → build from what exists; mark every gap in the README
-  ("gates default to X — no eval plan found defining thresholds").
-- No eval docs at all → tell the user and offer to run `eval-design` first
-  (recommended), or proceed with the generic defaults in references/modules.md,
-  clearly labelled as defaults to revisit.
+The blocker states which file and field is missing and which human action unblocks it. Exit the skill there.
 
-## Step 2: Discover the pipeline contract from the codebase
+If the user explicitly requests neutral plumbing anyway, generate only `config.py`, `pipeline_adapter.py`, `langfuse_writer.py`, and a README that repeats the blocker. No `evaluators/`, no judge prompt, no `gates.py` release logic, no thresholds.
 
-The adapter must call the **real app** — never reimplement its logic. Answer
-these from the code (do NOT ask the user):
+When registers are ready, implement only the routes they contain. An unaccepted route is generated as diagnostic/shadow code and cannot feed a gate.
 
-1. **How is a job started?** (HTTP endpoint + request body / queue message /
-   importable function). Prefer the same service endpoint production traffic
-   uses.
-2. **How is completion detected?** (status endpoint + terminal statuses /
-   callback / synchronous return). Note timeouts appropriate to the workload.
-3. **How are results fetched?** (endpoint + pagination + the exact field names
-   of the output records — ids, types, timestamps, confidence).
-4. **How does the harness authenticate?** (gateway/dev headers, bearer token,
-   API key). Find the path that works when calling the service directly.
-5. **How does the app call its LLM?** (client library, credentials pattern,
-   structured-output mechanism). The judge runner should use the same client
-   pattern with a **stronger model** than the one under eval.
-6. **What input does the judge need?** (file URI + MIME for multimodal, or
-   text). Multimodal judges MUST run in the harness — never as a
-   Langfuse-managed evaluator.
-7. **Local-run constraints** — modes that don't work locally (e.g. cloud task
-   queues that never fire), rate limits on the start endpoint, and the
-   cheapest mode for dev runs. Default the config to the mode that works
-   locally.
+## Step 2: Application entrypoint
 
-Record the answers as a short "pipeline contract" note; the adapter code
-comments should cite where each answer came from.
+Find how production starts one unit of work. The adapter imports or calls that entrypoint. It does not reimplement the product. Record the file and symbol in the adapter docstring. Default the runner to one call (`limit=1`, `runs=1`).
 
-## Step 3: Generate the module set
+## Step 3: Modules
 
-Read [references/modules.md](references/modules.md) and generate, under
-`eval_harness/` (or the project's convention for tooling folders):
+Read [references/modules.md](references/modules.md) and generate the package it specifies, including the top-level `Summary` aggregates and the per-route acceptance-evidence minimums. Conventional modules for contract validation and routing live in the consuming project, not in this skill repository.
 
-```
-eval_harness/
-  __init__.py          exports HarnessConfig + run_mode1
-  config.py            HarnessConfig — ALL user variables, env fallbacks, validate()
-  dataset_loader.py    golden items: local JSONL default + optional Langfuse Dataset
-  pipeline_adapter.py  the Step 2 contract, implemented (real app, no duplication)
-  judge_runner.py      judge call + strict schema + structural validation + retry
-  metrics.py           deterministic derivation + Wilson/bootstrap CIs + stratified aggregation
-  gates.py             ship gates on lower CI bounds (upper bound for "must stay below" rates)
-  langfuse_writer.py   LocalResultsWriter (default) + LangfuseScoreWriter; make_writer() switch
-  run_layer2.py        run_mode1() + CLI with exit 0/1 and --runs N consistency
-  sample_data/golden_sample.jsonl   schema template with REPLACE_ placeholders
-  README.md            variables table, prerequisites, run commands, cost warning
-```
+## Step 4: Notebook
 
-Non-negotiable invariants (from the harness spec):
+Read [references/notebook.md](references/notebook.md). Default execution is diagnostic. A thin slice does not imply a release pass.
 
-- **Langfuse bypass is total**: with `use_langfuse=False`, langfuse is never
-  imported and never contacted; all evidence lands on disk.
-- **Judge never computes a metric** — metrics derive deterministically from
-  validated judge JSON.
-- **CIs only at aggregate level**; per-item scores are point values.
-- **Gates on the CI bound, never the point estimate**; CLI exit code is the
-  enforcement mechanism.
-- **Run provenance recorded** with every run (dataset version, template/prompt
-  version, model + config).
-- Score names match the project's Langfuse score registry exactly.
+## Step 5: Offline checks
 
-Add the results directory to `.gitignore`.
+In a scratch environment, without network and without a live model:
 
-## Step 4: Generate the Mode 1 notebook
+- contract validation rejects missing approval, version mismatch, and missing acceptance evidence
+- explicit gate mode exits nonzero with a blocked reason before quality evaluation
+- an empty gate list does not pass
+- shadow verdict flips and shadow parse failures do not change an accepted gate exit code
+- marking a shadow route required blocks the decision instead of dropping it
+- human reviews import with no LLM credential; pending reviews do not pass a required human criterion
+- a hand-computed mix of Pass, Fail, Not applicable, and Unscorable keeps denominator and counts distinct
+- overlapping development and held-out items are rejected
+- with Langfuse bypassed, `langfuse` is never imported and local writer files round-trip
+- deterministic metrics match a hand-computed example; confidence intervals appear only on aggregates
+- the notebook JSON loads and every code cell passes `ast.parse`
 
-Read [references/notebook.md](references/notebook.md) and generate
-`eval_harness/notebooks/mode1_golden_layer2.ipynb`. The defining feature is a
-single prominent **⚙️ CONFIGURE ME** cell holding every user variable with
-inline comments — a user should never hunt through other cells or files to run
-the eval. Generate the .ipynb programmatically (build the JSON with a script)
-and validate that every code cell parses with `ast.parse`.
+Fix failures in the generated project. Live model calls and a live Langfuse project are out of scope; say so.
 
-## Step 5: Smoke-test the offline logic
+## Step 6: README
 
-Before reporting done, run (in an env with the package's deps — create a
-scratch venv if needed) a script that exercises everything that works without
-network:
+Document variables, the diagnostic default, the gate-mode preflight, and unverified live paths. State that fixture acceptance evidence is not real-model validation.
 
-- dataset loader on the shipped sample file;
-- judge structural-constraint validation (accept a valid alignment set, reject
-  a violating one);
-- metric derivation on a hand-computed example — verify recall/precision with
-  partial credit and the deterministic temporal IoU **by hand-checking the
-  arithmetic** (compute intersection/union yourself before asserting);
-- Wilson CI sanity bounds; aggregation produces the expected slice keys;
-- gate evaluation passes/fails the constructed example correctly;
-- local writer round-trip: all expected files exist and reload as valid JSON;
-- CLI module imports.
+## Invariants
 
-Fix every failure. The pipeline adapter and Langfuse writer cannot be fully
-verified offline — that's a handoff note, not a skipped step.
-
-## Step 6: README + honest handoff
-
-The README must contain: the **variables table** (variable → where to set it →
-what it is), prerequisites (app running, data prepared, credentials), run
-commands (notebook + CLI), and a **cost warning** sized to this project's
-per-item cost. State plainly what was NOT verified (live adapter run, live
-Langfuse write) and what the user must replace (sample-data placeholders).
-
----
-
-## Relationship to eval-design
-
-This skill implements what `eval-design` designs. If the design docs are
-missing, prefer running `eval-design` first — the generated code will be
-strictly better when rubrics, gates, and score names come from a reviewed
-design rather than generic defaults. This skill builds **Mode 1 (golden
-end-to-end eval)** fully; Modes 2–3 from the harness spec (component eval,
-post-production judge audit) remain design-only unless the user asks.
+- Langfuse bypass is total: `use_langfuse=False` never imports or contacts Langfuse.
+- Evaluators emit criterion results. Metrics and gates are separate code and read only accepted, scorable results unless the run is explicitly diagnostic.
+- Confidence intervals attach only to aggregates, and only when a measurement need declares them.
+- Process health (the runner finished) is separate from a Product verdict.
+- Diagnostic success may exit 0 with `decision_eligible=false` and no release verdict.
+- Gate mode that fails preflight exits nonzero. That is configuration refusal, not a judge-derived Product failure.
+- k=1 evidence is one call through the real entrypoint. Best-of-N is never reported as k=1.

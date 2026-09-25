@@ -1,6 +1,8 @@
-# Step 7: Generate architecture & roadmap HTML page
+# Step 7: HTML overview
 
-Produce `architecture-eval-overview.html` — a single self-contained visual summary page.
+Produce `architecture-eval-overview.html` only for the sections the current state allows. The page must show Product state, rubric approval state, evaluator acceptance state, blockers, and a one-line route summary without hiding a critical blocker behind a disclosure. Omit evaluator and gate sections when the state is `NEEDS_PRODUCT_DECISION` or `RUBRIC_REVIEW`, and show the blocker in the first screen.
+
+Single self-contained file. Offline styling only (no remote fonts, no CDN). Keep print CSS readable: status text is visible without hover.
 
 ## 7.0 Derive the visual theme from the project's frontend
 

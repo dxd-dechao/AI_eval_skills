@@ -1,6 +1,10 @@
 # Step 1 deliverables: architecture overview & LLM in-out flow documents
 
-Step 1's codebase exploration produces two standalone documents **before** Steps 3–6 begin. They are written first because every downstream deliverable reuses them: the eval plan's architecture summary condenses doc 1; the Layer 1 stage list, the Langfuse trace structure, and the HTML diagrams all derive from doc 2. Keep them factual — describe what the code does today, not what the eval design will add.
+Step 1's codebase exploration produces two standalone documents. Downstream design may cite them. Keep them factual: observed behaviour and configuration only.
+
+Code-derived thresholds, prompts, and schemas are implementation facts. They are not Product intent, approved quality bars, or decision authority. When a number comes from code, label it `observed` and cite the file. Do not copy it into a release gate unless `product-expectations.md` shows that Product approved that consequence.
+
+These documents are allowed in every workflow state, including `NEEDS_PRODUCT_DECISION`. They do not contain a scoring rubric, judge prompt, or ship gate.
 
 Both documents follow the header convention from SKILL.md (title + `Version: Draft 1.0 — [date]` line).
 

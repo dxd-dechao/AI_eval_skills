@@ -1,6 +1,14 @@
-# Step 3: Generate eval plan
+# Step 3: Rubric review and, only after approval, the eval plan
 
-Produce a full eval plan document (`3. eval-plan-full.md`) with this structure. Open the document with the Step 1 architecture summary (including the system-shape verdict line) and the Step 2 property table, then sections 3A–3H.
+Read [product-expectations.md](product-expectations.md) first.
+
+**If expectations are missing,** do not write this document.
+
+**If expectations exist and the rubric is not approved,** write `rubric-review.md` and `rubric-register.json` only. Candidate criteria are atomic and binary. The review record stays pending until Product/domain and the named expert approve a version against real examples and boundary cases. Stop. Do not write judge prompts, ordinal scales, or gates.
+
+**If a rubric version is approved,** write `3. eval-plan-full.md` from that register. Open with the architecture summary, the system-shape line, and the observed-property table, then sections 3A–3H. Decision gates appear only for evaluators whose acceptance evidence is in `evaluator-register.json`. Other routes are marked `DIAGNOSTIC/SHADOW ONLY`.
+
+Produce a full eval plan document only in the approved state.
 
 **Mandatory-content rule.** Every section and table row below is required unless a Step 1/2 verdict prunes it. When pruned, write **"N/A — [reason]"** in place; never silently omit. Rows explicitly marked *(N/A allowed)* are the only ones that may be waived for a stage where they genuinely don't apply — and the waiver must still be written out.
 
@@ -24,67 +32,25 @@ For each scenario dimension (venue type, document type, etc.):
 
 > **If the system has no scenario dimensions** (per Step 1): drop the "per scenario dimension" requirement and instead stratify by the real variation axis you identified (input difficulty, category, length band, source). If the system is truly uniform, report a single well-characterised metric distribution with confidence intervals — but state explicitly that no scenario axis exists. Do not fabricate a dimension to satisfy the template.
 
-### LLM-as-judge evaluators (Layer 2)
+### Criterion routing (Layer 2)
 
-LLM-as-judge evaluators mirror the same metrics as the deterministic Layer 2 eval (detection recall, precision, classification accuracy, temporal precision, false positive rate), but are computed by a more advanced model than the one being evaluated. They run during offline eval against the golden dataset alongside deterministic metrics, providing a second signal that can catch subtler failures (partial detections, near-misses, severity miscalibration) that binary matching misses.
+Layer 2 reports the Product outcome. Each approved criterion is binary (`Pass` / `Fail`) when the unit is applicable and the evidence is sufficient. `UNSCORABLE` and not-applicable are not partial credit.
 
-**Core principle:** The judge evaluates the SAME dimensions as deterministic L2 metrics — not separate "quality" dimensions. The judge is a more capable model re-scoring the system's output against the same ground truth, using its stronger reasoning to assign partial credit and surface edge-case failures that strict matching would miss.
+Do not start from a standard LLM-judge suite. Route each approved criterion with the table in [product-expectations.md](product-expectations.md):
 
-**When to use LLM-as-judge:**
-- The system's output has richness beyond binary match (timestamps with tolerance, free-text descriptions, severity levels)
-- You want partial-credit scoring where deterministic matching gives only 0/1
-- You need to evaluate dimensions where "correct" has gradients (a description can be mostly-right, not just right/wrong)
-- You want a second opinion on borderline matches that deterministic logic might mis-score
+- fully specified and machine-observable → `deterministic`
+- interpretive, evolving, rare, or requiring named accountability → `human` (named expert)
+- interpretive, stable and repeated at scale → optional `llm`, only after fresh held-out human validation and evaluator acceptance
 
-**For each LLM-as-judge evaluator, define:**
+A rare criterion stays with the named expert even when its judgment is stable. Choosing `llm` requires a stated volume reason in `measurement_rationale`.
 
-| Field | Content |
-|-------|---------|
-| Name | What this judge evaluates (mirrors a Layer 2 metric) |
-| Dimension | The specific quality being measured |
-| Input | Source input (video/document) + system output + ground-truth annotation |
-| Rubric | Scoring criteria (see rubric rule below) |
-| Scale | Score range and what each level means (e.g., 1-5, or binary pass/fail) |
-| Model | A more advanced model than the one being evaluated (different model family or tier) |
-| Calibration | How to validate the judge agrees with human judgment before trusting it |
-| Deterministic counterpart | Which L2 metric this judge corresponds to |
+An ordinal measure appears only when that product's approved contract defines an ordinal scale. It does not replace the binary decision criterion and it is not a default.
 
-**Rubric rule.** A scale alone (e.g. "1–5") is not a rubric. In the generated plan:
-- Judges that feed a ship gate or a graded score (faithfulness, severity, any 1–5 judge) get a **fully worked rubric**: one concrete, domain-specific example at every score level.
-- Remaining judges may ship as **rubric stubs** (criteria named, examples marked `TODO before calibration`) — but each stub must be explicitly flagged, and the calibration phase (golden-dataset spec 4I, Phase 3) blocks on completing them.
+**Rubric rule.** A criterion needs one independently failable judgment, a pass rule, a fail rule, an unscorable rule, and the evidence that rule needs. A numeric scale is not a rubric.
 
-**Standard judge suite (mirrors L2 metrics):**
+**Acceptance rule.** Rubric approval does not accept the evaluator. Deterministic routes need known-good, known-bad, and edge cases tied to the implementation version. Human routes need attributable reviews. LLM routes need a fresh held-out set disjoint from development examples, plus agreement, error, stability, and run-health checks chosen for that label regime. Do not invent a universal kappa, correlation, or sample-size cutoff. Until that evidence is recorded, the route is `DIAGNOSTIC/SHADOW ONLY` and cannot set a baseline or feed a gate.
 
-| Judge | L2 metric counterpart | What it re-scores | Input to judge |
-|-------|----------------------|-------------------|----------------|
-| **Detection judge** | Recall + Precision | Did the system find all real events? Are any outputs fabricated? | Source input + system events + ground-truth annotations → per-event verdict |
-| **Classification judge** | Classification accuracy | For detected events, is the assigned type correct? Are borderline cases reasonably categorised? | System event + ground-truth event → type-match verdict with partial credit |
-| **Temporal judge** | Temporal IoU | Are timestamps accurate enough to locate the incident? | Source input + system timestamps + ground-truth timestamps → localisation score |
-| **Faithfulness judge** | (extends precision) | Does the description match what actually happened? | Source input + system event description → accuracy score |
-| **Severity judge** | (extends classification) | Is the assigned confidence/severity proportionate? | Source input + system event (with confidence) → calibration score |
-
-**Calibration process (meta-evaluation):**
-1. Take 50-100 outputs from the golden dataset and have humans score them on the same rubric
-2. Run the LLM judge on the same outputs
-3. Compute agreement (Cohen's kappa, Pearson correlation, or % within 1 point)
-4. If agreement < 0.7 kappa or < 0.8 correlation → revise the rubric, add examples, or try a different judge model
-5. Document the calibration results — the judge is only as trustworthy as its agreement with humans
-6. Re-calibrate periodically (judge drift is real, especially after model updates)
-
-Calibration is not free-floating: it must appear as an explicit item in the golden-dataset phased rollout (4I) — by default in the baseline phase, before any judge score is used in a gate.
-
-**Integration with offline eval:**
-- The judge runs during the same eval pipeline as deterministic metrics (against golden dataset)
-- Judge scores are written to the same traces as deterministic scores (separate score names, e.g. `judge_recall` vs `eval_recall`)
-- Disagreements between judge and deterministic metrics are flagged for human review (these reveal matching-logic edge cases)
-- The judge provides partial credit where deterministic matching gives 0/1 — a "mostly correct" detection gets 0.7 from the judge while getting 0 from strict matching
-
-**Anti-patterns to avoid:**
-- Don't use the same model to judge its own outputs (self-evaluation bias)
-- Don't trust a judge without calibration data
-- Don't use LLM-as-judge as a REPLACEMENT for deterministic metrics — it's a complement that adds partial credit and catches edge cases
-- Don't collapse multiple dimensions into one judge prompt — separate judges per dimension for debuggability
-- Don't run judge eval in a separate pipeline from deterministic eval — they must run together on the same dataset to enable disagreement analysis
+**Aggregation rule.** Use only the Product-approved rule. Not applicable leaves the denominator. Unscorable, pending, and error counts stay visible. Empty or all-excluded required evidence does not pass.
 
 ## 3C. Layer 1 — Component eval
 
@@ -225,7 +191,7 @@ If a cell has fewer samples than the floor, report the metric with its (wide) CI
 ```
 disparity_ratio = min(M across levels of A) / max(M across levels of A)
 ```
-Gate: `disparity_ratio ≥ 0.80` (the worst-performing group achieves ≥ 80% of the best group's score). Tighten for safety-critical systems.
+Gate parameter: `disparity_ratio ≥ <Product-approved minimum>`. The minimum is a Product decision recorded on the criterion's decision consequence and in the decision log. If that value is absent, the fairness gate is blocked. The skill does not supply a number.
 
 **Privacy note:** Demographic labels are sensitive. Store fairness-axis annotations in a separate access-controlled dataset partition. Never include them in production traces or dashboards visible to general users. Access restricted to eval pipeline service accounts and designated DS reviewers.
 
@@ -241,11 +207,12 @@ When the system is safety-critical, not all errors are equal. Define and gate on
 
 **Ship/no-ship rule:** When harm-severity weighting applies, the gate is on the costly-direction metric's lower confidence bound (not point estimate), not on aggregate F1. A system can ship with moderate overall F1 if the costly direction is well-controlled. Conversely, high F1 does NOT clear a system where the costly direction is unacceptably high.
 
-**Worked example:** A school video system where fighting detection is P0-safety:
-- Costly direction: false negative (missed fight)
-- Gate: recall lower 95% CI bound ≥ 0.90 for fighting/bullying
-- Secondary gate: precision lower 95% CI bound ≥ 0.75 (false accusations still matter, but less than missed events)
-- Ship decision uses the CI bound, not the point estimate (see 3H)
+**Illustrative only (not a transferable threshold).** A school video system where fighting detection is treated as safety-critical:
+- Costly direction: false negative (missed fight). This direction is a candidate until Product records it.
+- Gate parameter: recall lower 95% CI bound ≥ `<Product-approved value for this behaviour>`. No number belongs in the skill.
+- Secondary parameter: precision lower 95% CI bound ≥ `<Product-approved value>`. No number belongs in the skill.
+- If either value is absent, that gate is blocked.
+- A ship decision uses the CI bound, not the point estimate (see 3H), and only after those values are approved.
 
 ## 3H. Statistical rigor
 
@@ -289,7 +256,7 @@ LLM outputs vary across runs on identical inputs. This variance must be measured
 
 | Parameter | Default | When to increase |
 |-----------|---------|-----------------|
-| Runs per item (N) | 3 | High-stakes items (P0 behaviours): 5. When variance across 3 runs exceeds 20% of the mean for any metric. |
+| Runs per item (k) | 1 first | Increase only when a declared measurement need says the metric requires repeats. k=1 is wiring evidence, not a release baseline. Never report best-of-N as k=1. |
 | Reported value | mean ± std across N runs | Always |
 | Consistency metric | Agreement rate: fraction of runs that produce the same detection set (item-level) | Report alongside primary metrics |
 
