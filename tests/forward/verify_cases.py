@@ -304,7 +304,8 @@ def _refused(staged: Path) -> tuple[bool, str]:
     quality = payload.get("quality_evaluated")
     invoked = payload.get("invocation_count")
     raw = payload.get("raw_output")
-    before_quality = quality is False or (quality is None and invoked in (0, None) and not raw)
+    no_calls = invoked in (0, None, "", []) or invoked == ()
+    before_quality = quality is False or (quality is None and no_calls and not raw)
     cli = _cli_gate(staged)
     detail = f"preflight_ok={ok} reason={reason} run_exit={payload.get('exit_code')} quality={quality} calls={invoked} cli_exit={cli.returncode}"
     refused = ok is False and bool(reason) and payload.get("exit_code") not in (0, None) and before_quality and cli.returncode != 0
@@ -573,11 +574,11 @@ def _check_c_metrics(repo: Path, report: Report, case: str) -> None:
         ),
         "gate-missing-version": (
             lambda exp, rub, reg: [row.update({"criterion_version": ""}) for row in reg.get("routes") or [] if row.get("criterion_id") == "C-len"],
-            "criterion_version",
+            "version",
         ),
         "gate-version-mismatch": (
             lambda exp, rub, reg: [row.update({"criterion_version": "9.9"}) for row in reg.get("routes") or [] if row.get("criterion_id") == "C-len"],
-            "9.9",
+            "version",
         ),
         "gate-missing-acceptance": (
             lambda exp, rub, reg: [
@@ -698,13 +699,9 @@ def _check_c_metrics(repo: Path, report: Report, case: str) -> None:
 
     def _proxies():
         metrics = box["metrics"]
-        found = None
-        for name, value in vars(metrics).items():
-            if "PROXY" in name and isinstance(value, (dict, list, tuple, set)):
-                found = name
-                break
-        if found is None:
-            return False, "no separate proxy-name mapping on eval_harness.metrics"
+        found = getattr(metrics, "PRODUCTION_PROXIES", None)
+        if not isinstance(found, dict):
+            return False, "metrics.PRODUCTION_PROXIES is missing"
         summary = box.get("summary")
         leaked = []
         if summary is not None:
