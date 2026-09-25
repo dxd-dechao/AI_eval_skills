@@ -2,7 +2,7 @@
 
 Write this document only from an approved rubric and `evaluator-register.json`. Inputs are the registers, not a generic judge suite.
 
-The generated runner defaults to diagnostic execution (`decision_eligible=false`, no release verdict). Explicit gate mode preflights approval, accepted evaluator versions, Product consequence, and coverage, and exits nonzero with a blocked reason before quality scoring when any of those are missing. Zero checks are a blocked configuration, not a pass.
+The generated runner defaults to diagnostic execution (`decision_eligible=false`, no release verdict). Explicit gate mode preflights the Eval Spec (`READY`, and trial contract `k=1` with `runs == 1`), approval, accepted evaluator versions, Product consequence, and coverage, and exits nonzero with a blocked reason before quality scoring when any of those are missing. Zero checks are a blocked configuration, not a pass.
 
 Shadow scores stay off the gate. A required unaccepted criterion blocks the decision. k=1 through the real entrypoint is the first run.
 

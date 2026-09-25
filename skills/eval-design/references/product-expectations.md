@@ -1,6 +1,6 @@
 # Product expectations, rubric review, and evaluator routing
 
-Canonical contract for `eval-design` and for any harness that consumes its registers. Read this before drafting criteria, judge prompts, thresholds, or release gates.
+Canonical contract for `eval-design` and for any harness that consumes its registers. Read [eval-spec.md](eval-spec.md) first. A rubric is drafted only after the Eval Spec is `READY`. Read this before drafting criteria, judge prompts, thresholds, or release gates.
 
 Schema version for every JSON register: `product-eval-contract/1`.
 
@@ -14,7 +14,7 @@ Stable IDs are strings chosen once and kept. No database, approval service, or s
 
 | State | Meaning | Design outputs that are in scope | Stop before |
 |-------|---------|----------------------------------|-------------|
-| `NEEDS_PRODUCT_DECISION` | Usable Product expectations are absent | `product-expectations.md` + `product-expectations.json`, plus factual architecture docs | Candidate scoring rubric, evaluator, judge prompt, threshold, release gate |
+| `NEEDS_PRODUCT_DECISION` | The Eval Spec is missing or not `READY`, or usable Product expectations are absent | `eval-spec.md` + `eval-spec.json`, `product-expectations.md` + `product-expectations.json`, plus factual architecture docs | Candidate scoring rubric, evaluator, judge prompt, threshold, release gate |
 | `RUBRIC_REVIEW` | Expectations exist; rubric is not approved | `rubric-review.md` + `rubric-register.json` | Evaluator implementation and judge prompts |
 | `EVALUATOR_ROUTING` | Rubric version is approved; evaluator acceptance is separate | `evaluator-register.json` and the design docs that record routes | Treating an unaccepted evaluator as decision-eligible |
 | `DECISION_READY` | Each criterion required by the declared decision policy has an accepted evaluator and a Product-approved consequence | Decision-facing plan, dataset split, harness spec | Using development labels as held-out acceptance evidence |
@@ -198,8 +198,8 @@ Start with one production-like output (`k=1`, limit 1) through the real applicat
 
 ## State transitions
 
-1. No usable expectations → write the intake, state `NEEDS_PRODUCT_DECISION`, stop.
-2. Expectations supplied, review record not approved → write the candidate rubric and review packet, state `RUBRIC_REVIEW`, stop.
+1. Eval Spec missing or not `READY`, or no usable expectations → write the Eval Spec and the intake, state `NEEDS_PRODUCT_DECISION`, stop. One decision-log row per missing Eval Spec answer or holder.
+2. Eval Spec is `READY` and expectations are supplied, review record not approved → write the candidate rubric and review packet, state `RUBRIC_REVIEW`, stop. Each criterion's applicable unit is the spec's judgment unit. Carry `trial_contract` unchanged.
 3. Approved rubric version recorded → route each criterion, state `EVALUATOR_ROUTING`. Unaccepted routes stay diagnostic.
 4. Scoped acceptance evidence recorded for every criterion the decision policy requires → `DECISION_READY` for that policy only.
 

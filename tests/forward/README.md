@@ -8,20 +8,22 @@ These scripts prepare temporary git repositories and later verify artifacts a sk
 python3 tests/forward/prepare_cases.py --root /private/tmp/ai-eval-skills-forward-<run-id>
 ```
 
-The target directory must be missing or empty. The command creates four repos:
+The target directory must be missing or empty. The command creates six repos:
 
 | Repo | Input state |
 |------|-------------|
 | `A-missing-expectations` | Application only. No Product packet. |
-| `B-expectations-only` | Application plus expectations JSON. No approved rubric. |
-| `C-approved-criteria` | Approved rubric, three routes, disjoint development and held-out manifests. |
-| `D-approved-unrouted` | Approved rubric and expectations. No `evaluator-register.json`. |
+| `B-expectations-only` | Application plus expectations JSON and a ready `k=1` Eval Spec. No approved rubric. |
+| `C-approved-criteria` | Approved rubric, three routes, disjoint development and held-out manifests, ready `k=1` Eval Spec. |
+| `D-approved-unrouted` | Approved rubric and expectations. No `evaluator-register.json`. Ready Eval Spec, `k=1`. |
+| `E-episode-unapproved` | Tool-using app, supplied expectations, ready Eval Spec (`pass^k`, k=3, judgment unit is a task episode). Rubric not approved. |
+| `F-dialog-missing-unit` | Multi-message app, supplied expectations, Eval Spec whose judgment-unit answer is missing and whose holder is named. |
 
-Each repo contains `PROMPT.md` (the user request), `app/` (a document summarizer with an invocation counter), and `INPUT_MANIFEST.json`. Case A also contains `PROMPT-PLUMBING.md` for a separate generator that asks only for neutral execution plumbing. Case C also contains `Knowledge/` registers. Case D contains expectations and an approved rubric only. Synthetic names are fixtures, not real approvals.
+Each repo contains `PROMPT.md` (the same request for every case), `app/`, and `INPUT_MANIFEST.json`. Cases A–D use a document summarizer with an invocation counter. Case E uses a two-tool order helper. Case F uses a multi-message helper. Case A also contains `PROMPT-PLUMBING.md` for a separate generator that asks only for neutral execution plumbing. Cases B, C, and D contain a ready `k=1` Eval Spec. Case C also contains the other `Knowledge/` registers. Case D contains expectations, the Eval Spec, and an approved rubric only. Synthetic names are fixtures, not real approvals. Inputs do not name archetypes, criteria, routes, or expected verifier output.
 
 ## Invoke
 
-Use a new run id. Run `prepare_cases.py` into `/private/tmp/ai-eval-skills-forward-<run-id>/`. Give each case a fresh generator. That generator receives only its case repo, `skills/eval-design`, `skills/eval-harness-build`, and that case's `PROMPT.md`. Do not provide this verifier, an answer key, or another case. Do not send a follow-up after a generator finishes, and do not reveal verifier output. After case A finishes, a new generator may read that same repo plus `PROMPT-PLUMBING.md` and add neutral plumbing only. If a probe fails, record it, fix the skill text, and regenerate that case from scratch under a new run id. Then run this verifier read-only on the Planner case C at `/private/tmp/ai-eval-skills-forward-qa2-planner` and record the result.
+Use a new run id. Run `prepare_cases.py` into `/private/tmp/ai-eval-skills-forward-<run-id>/`. Give each case a fresh generator. That generator receives only its case repo, `skills/eval-design`, `skills/eval-harness-build`, and that case's `PROMPT.md`. Do not provide this verifier, an answer key, or another case. Do not send a follow-up after a generator finishes, and do not reveal verifier output. After case A finishes, a new generator may read that same repo plus `PROMPT-PLUMBING.md` and add neutral plumbing only. If a probe fails, record it, fix the skill text, and regenerate that case from scratch under a new run id.
 
 ## Verify
 

@@ -1,6 +1,6 @@
 # AI Eval Skills
 
-Two skills that take an AI/LLM project from Product expectations through an approved rubric to a fail-closed eval harness. They stop when the next decision is not in evidence. They do not invent Product intent, approvers, or thresholds.
+Two skills that take an AI/LLM project from a Stage 00 Eval Spec and Product expectations through an approved rubric to a fail-closed eval harness. They stop when the next decision is not in evidence. They do not invent Product intent, approvers, or thresholds.
 
 The sequence follows the Eval Playbook's Product-to-evaluation bridge (Stage 00 and Stage 03): Product supplies expectations → atomic binary rubric → Product/domain and named-expert approval → one evaluator per accepted criterion → evaluator verification → decision use.
 
@@ -18,11 +18,11 @@ That evaluator is accepted separately, with its own evidence, before it can supp
 
 | State | What you get |
 |-------|----------------|
-| No usable Product expectations | Intake (`product-expectations.md` + JSON) marked **BLOCKED — Product decision required**, plus factual architecture notes. No rubric, judge, threshold, or gate. |
+| Eval Spec missing or not ready, or no usable Product expectations | Eval Spec (`eval-spec.md` + JSON) and intake (`product-expectations.md` + JSON) marked **BLOCKED — Product decision required**, plus factual architecture notes. No rubric, judge, threshold, or gate. |
 | Expectations supplied, rubric not approved | Candidate binary criteria and a review packet. Stops before evaluators. |
 | Rubric approved | Per-criterion routes, dataset split, Langfuse registry, harness spec, HTML. Unaccepted evaluators stay diagnostic. |
 
-Each state writes readable Markdown beside a JSON register the harness can validate: `product-expectations.json`, `rubric-register.json`, `evaluator-register.json`, plus separately versioned development and held-out manifests.
+Each state writes readable Markdown beside a JSON register the harness can validate: `eval-spec.json`, `product-expectations.json`, `rubric-register.json`, `evaluator-register.json`, plus separately versioned development and held-out manifests. Gate mode runs only when the Eval Spec is ready and its trial contract is `k=1` with one run.
 
 Factual architecture documents (when code is explored):
 
@@ -60,9 +60,7 @@ Invariants: diagnostic success can exit 0 with `decision_eligible=false`; gate m
 
 ## Best fit
 
-Detection/classification-style LLM pipelines — systems where video, text, or documents flow through one or more AI models and produce structured outputs (incidents, classifications, scores, matches).
-
-Examples: school safety analytics, content moderation, document processing, support ticket routing, medical triage.
+Any LLM feature whose user-facing outcome can be stated as atomic Pass/Fail criteria. Patterns cover classification, open-ended generative, rubric scoring, conversational, and agentic outputs. Harness execution is k=1 until multi-trial support lands.
 
 ## Usage
 
@@ -79,7 +77,7 @@ Both skills read the codebase for facts. They ask, in a decision log, when Produ
 
 ### Recommended workflow
 
-1. Run `/eval-design` and finish the Product intake before any rubric is treated as approved
+1. Run `/eval-design` and finish the Eval Spec and the Product intake before any rubric is treated as approved
 2. Product/domain and the named expert approve a rubric version
 3. Run `/eval-harness-build` only after that approval is in the registers
 
@@ -101,6 +99,7 @@ skills/
       langfuse-setup.md         # Requirements for doc 5
       eval-harness.md           # Requirements for doc 6
       html-overview.md          # Requirements for HTML overview
+      eval-spec.md              # Stage 00 Eval Spec
       product-expectations.md   # Intake, rubric review, routing contract
   eval-harness-build/
     SKILL.md                    # Skill definition and workflow

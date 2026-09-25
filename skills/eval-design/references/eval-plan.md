@@ -24,13 +24,7 @@ Layer 1: Component eval (diagnostics)
 
 ## 3B. Layer 2 — End-to-end eval
 
-For each scenario dimension (venue type, document type, etc.):
-- Detection/correctness metrics
-- Precision (false positive rate)
-- Classification accuracy (if multiple categories)
-- All metrics reported PER SCENARIO DIMENSION — never a single aggregate
-
-> **If the system has no scenario dimensions** (per Step 1): drop the "per scenario dimension" requirement and instead stratify by the real variation axis you identified (input difficulty, category, length band, source). If the system is truly uniform, report a single well-characterised metric distribution with confidence intervals — but state explicitly that no scenario axis exists. Do not fabricate a dimension to satisfy the template.
+Layer 2 reports the Product outcome on the Eval Spec's judgment unit. The Step 1 archetype tag picks which pattern below is relevant. The tag does not set a criterion, a route, or a threshold. No pattern below introduces a numeric threshold. Candidate criteria stay atomic Pass/Fail drafts for Product and expert approval.
 
 ### Criterion routing (Layer 2)
 
@@ -50,7 +44,43 @@ An ordinal measure appears only when that product's approved contract defines an
 
 **Acceptance rule.** Rubric approval does not accept the evaluator. Deterministic routes need known-good, known-bad, and edge cases tied to the implementation version. Human routes need attributable reviews. LLM routes need a fresh held-out set disjoint from development examples, plus agreement, error, stability, and run-health checks chosen for that label regime. Do not invent a universal kappa, correlation, or sample-size cutoff. Until that evidence is recorded, the route is `DIAGNOSTIC/SHADOW ONLY` and cannot set a baseline or feed a gate.
 
-**Aggregation rule.** Use only the Product-approved rule. Not applicable leaves the denominator. Unscorable, pending, and error counts stay visible. Empty or all-excluded required evidence does not pass.
+**Aggregation rule.** Use only the Product-approved rule. Not applicable leaves the denominator. Unscorable, pending, and error counts stay visible. Empty or all-excluded required evidence does not pass. Repeat trials only under the Eval Spec's trial contract. Record per-trial success and k. Never compare or trend results across different k.
+
+### Classification
+
+Source: Playbook worked example `pr-cctv`. Typical judgment unit: one classified output (a clip, event window, or labelled item). Candidate criterion families: one binary detection or class judgment per behaviour the Product named. Typical routes follow the routing rule above (a fully specified label check can be deterministic; a contested boundary stays with the named expert). Report evaluator validation as TPR and TNR separately, plus PR-AUC when the Product asks for a ranking view. Report those per real variation axis.
+
+Keep these classification rules:
+
+- For each scenario dimension (venue type, document type, or another observed axis): detection/correctness, precision (false positive rate), and classification accuracy only when several categories are in scope.
+- All metrics reported per scenario dimension, never as one aggregate that hides the axis.
+- If the system has no scenario dimensions (Step 1): stratify by the real variation axis (input difficulty, category, length band, source). If the system is truly uniform, report one well-characterised distribution with confidence intervals and state that no scenario axis exists. Do not fabricate a dimension.
+
+Named traps: never report accuracy at low prevalence (a rare event can score high accuracy while missing the cases that matter). Synthetic data cannot fill real positives: generated stand-ins are not the substrate for a reported recall number. Contested category boundaries are settled in the Eval Spec before modelling.
+
+### Open-ended generative
+
+Source: Playbook worked example `pr-feedback`. Typical judgment unit: one generated passage. There is no single correct output, so reference-based scoring breaks. Candidate criterion families: binary claims decomposed from the Product outcome (for example specific, actionable, evidence-grounded, non-hallucinated), each still an atomic Pass/Fail draft. Typical routes: named expert while the claim is interpretive; optional LLM only after the routing rule's held-out acceptance. Report evaluator validation as TPR and TNR per criterion against the named expert. Do not collapse the claims into one score.
+
+Named trap: the holistic 1–5 quality score. It is unstable and cannot drive a gate.
+
+### Rubric scoring
+
+Source: Playbook worked example `pr-essay` (ordinal scoring only). Use this pattern only where the Product contract is genuinely ordinal: stable, meaningfully spaced bands. Otherwise use open-ended generative binary claims. Typical judgment unit: one artifact per rubric dimension. Candidate criterion families: the binary decision criterion still stands; the ordinal band is the product measure, not a replacement. Typical routes: named expert for the band judgment; a model grader only after held-out acceptance. Report evaluator validation per dimension as quadratic weighted κ, adjacency rate, and signed bias (automated minus expert: positive means more generous). The agreement threshold is set per rubric. Never publish a universal cutoff.
+
+Named traps: exact-match agreement treats an adjacent band as a total miss; report adjacency and weighted κ. Judge length/fluency bias: model judges reward length and fluency; signed bias is how that shows up.
+
+### Conversational
+
+Source: Playbook worked example `pr-chat`. Typical judgment unit: whatever the Eval Spec decided, a turn or a session. Turn-level quality does not compose into session quality. If the judgment-unit answer is missing, stop; do not choose turn or session. Candidate criterion families: atomic Pass/Fail claims on that unit. Trajectory may locate the first failure and does not replace the outcome. Typical routes follow the routing rule per criterion. Report evaluator validation as TPR and TNR per criterion against the named expert, on the spec's unit. Decompose failures by stage (for example transcription versus comprehension versus response) so a stage failure is not labelled as a response failure.
+
+Named trap: a locally good turn that derails the session still fails a session-level outcome when the spec's unit is the session.
+
+### Agentic
+
+Source: Playbook worked example `pr-proc`. Typical judgment unit: a task episode. Candidate criterion families, still atomic Pass/Fail drafts: at least one final-state criterion (the episode's resulting state) and at least one trajectory or policy criterion (the path, including an unauthorised tool call). The final state is often checkable in code, but the path matters. A correct final state reached through a forbidden action fails the policy criterion. Typical routes: deterministic for a machine-observable final state or a tool-allow list; named expert when authorization meaning is interpretive. Report evaluator validation on the episode: per-trial success under the Eval Spec retry contract, plus a policy-violation view across the whole trajectory. When the contract is `pass^k` or `pass@k`, record that mode and k; do not replace them with `k=1`. The transition failure matrix maps last good state to first failure and locates the break. It does not set a threshold.
+
+Named trap: checking only the final answer.
 
 ## 3C. Layer 1 — Component eval
 

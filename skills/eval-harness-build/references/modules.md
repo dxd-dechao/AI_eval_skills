@@ -26,7 +26,9 @@ eval_harness/
 
 `HarnessConfig` is a dataclass and the only place that reads environment variables.
 
-Required fields: `mode` (`"diagnostic"` default, or `"gate"`), `limit` (default 1), `runs` (default 1), `use_langfuse` (default False), `results_dir`, `expectations_path`, `rubric_path`, `evaluator_register_path`, `dataset_path`, `decision_policy` (criterion IDs the Product policy requires, copied from the register), `reviews_path` (optional path to a local review file; null when absent).
+Required fields: `mode` (`"diagnostic"` default, or `"gate"`), `limit` (default 1), `runs` (default 1), `use_langfuse` (default False), `results_dir`, `eval_spec_path` (path to `eval-spec.json`; null when absent), `expectations_path`, `rubric_path`, `evaluator_register_path`, `dataset_path`, `decision_policy` (criterion IDs the Product policy requires, copied from the register), `reviews_path` (optional path to a local review file; null when absent).
+
+`eval_spec_path` defaults to null. Callers pass the spec path explicitly. Do not invent a spec.
 
 `validate()` collects every structural problem and raises one error. It does not judge output quality.
 
@@ -34,7 +36,14 @@ Required fields: `mode` (`"diagnostic"` default, or `"gate"`), `limit` (default 
 
 `load_registers(config) -> dict` reads the three JSON artifacts and checks `schema_version == "product-eval-contract/1"`.
 
-`preflight_gate(config) -> PreflightResult` runs only for decision use. It returns `ok=False` and a `blocked_reason` **before any quality evaluation** when:
+`load_eval_spec(config) -> dict | None` reads `config.eval_spec_path` when it is set. A missing path or missing file returns None. It does not score quality.
+
+`preflight_gate(config) -> PreflightResult` runs only for decision use. It checks the Eval Spec **before any other gate check and before any quality evaluation**:
+
+- If the spec is missing, `state` is not `READY`, or any of the 8 decisions lacks an answer or a holder: return `ok=False` and `blocked_reason` exactly `eval spec not ready: <missing items>` (name the missing file, the state, or the decision ids). Do not continue to later checks.
+- If `trial_contract.mode` is not `k=1`, or `trial_contract.k` is not `1`, or `config.runs` is not `1`: return `ok=False` and `blocked_reason` exactly `unsupported trial contract: <mode> k=<k>` using the spec's mode and k (use `missing` when the contract is absent). Do not implement `pass^k` or `pass@k`. Do not continue to later checks.
+
+Only when those two checks pass, also return `ok=False` and a `blocked_reason` **before any quality evaluation** when:
 
 - expectations state is `NEEDS_PRODUCT_DECISION` or the file is missing
 - rubric `review.approval_state` is not approved, or approver/date/version is missing
@@ -133,7 +142,9 @@ Load local JSONL or a JSON array. `assert_held_out_disjoint(development_manifest
 
 ## langfuse_writer.py
 
-`LocalResultsWriter` writes `run_meta.json`, `items.jsonl`, `summary.json`, and `decision.json`. `run_meta.json` includes criterion versions, evaluator versions, acceptance state, the accepted evidence object (including `implementation_version` when that route is deterministic), provenance, `decision_eligible`, and `k`.
+`LocalResultsWriter` writes `run_meta.json`, `items.jsonl`, `summary.json`, and `decision.json`. `run_meta.json` includes criterion versions, evaluator versions, acceptance state, the accepted evidence object (including `implementation_version` when that route is deterministic), provenance, `decision_eligible`, `k`, and `trial_contract`.
+
+`trial_contract` is copied from the Eval Spec (`{"mode": "k=1" | "pass^k" | "pass@k", "k": <int>}`) when the spec file loads. When no spec is loaded, write `trial_contract: null`. Diagnostic mode always records this field and still runs when the contract is not `k=1`. Gate mode never reaches the writer when preflight refused the spec.
 
 `make_writer(config)` returns the local writer when `use_langfuse` is false and must not import `langfuse` anywhere on that path. A Langfuse writer subclass imports `langfuse` only inside its own methods. Local files are still written.
 
@@ -141,9 +152,9 @@ Load local JSONL or a JSON array. `assert_held_out_disjoint(development_manifest
 
 `run(config, limit=None) -> RunResult` uses `config.limit` when `limit` is omitted. Default limit is 1. For each selected item call `run_item` once (k=1). Do not retry and then keep the best score as the k=1 record.
 
-Diagnostic mode (`config.mode != "gate"`): still record every criterion result, set `decision_eligible=false`, `release_verdict=null`, and return `exit_code=0` when the process itself succeeded (the app was called and results were written). Item-level product failures do not become a release fail in diagnostic mode.
+Diagnostic mode (`config.mode != "gate"`): still record every criterion result, set `decision_eligible=false`, `release_verdict=null`, and return `exit_code=0` when the process itself succeeded (the app was called and results were written). Item-level product failures do not become a release fail in diagnostic mode. Do not refuse a non-`k=1` spec in diagnostic mode; record `trial_contract` in `run_meta.json` and still call the entrypoint.
 
-Gate mode: call `preflight_gate` first. On failure return immediately with `exit_code=2` and do not need to have judged quality. On success, evaluate only accepted routes and set the exit code from `evaluate_decision`.
+Gate mode: call `preflight_gate` first. On failure return immediately with `exit_code=2`, `quality_evaluated=false`, and do not call the application entrypoint. On success, evaluate only accepted routes and set the exit code from `evaluate_decision`. The only supported gate contract is spec `trial_contract.mode == "k=1"`, `trial_contract.k == 1`, and `config.runs == 1`.
 
 CLI: `python -m eval_harness.run_eval --mode diagnostic|gate`. Exit with `RunResult.exit_code`.
 
