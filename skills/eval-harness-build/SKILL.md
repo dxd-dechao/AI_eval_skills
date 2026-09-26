@@ -4,7 +4,8 @@ description: >-
   Generate a Python eval harness from an approved rubric and evaluator
   register: route-specific deterministic, human, and optional LLM evaluators,
   fail-closed decision gates, and a diagnostic-by-default notebook. Gate mode
-  also requires a READY Eval Spec whose trial contract is k=1 with runs 1.
+  also requires a READY Eval Spec. The spec supplies the trial contract
+  (k=1, pass^k, or pass@k) and the judgment unit (output, session, or episode).
   Stops with an actionable blocker when the Eval Spec, Product expectations,
   or rubric approval are missing. Use when the user asks to build, scaffold,
   or implement an eval harness, eval runner, or golden-eval notebook.
@@ -53,7 +54,7 @@ When registers are ready, implement only the routes they contain. An unaccepted 
 
 ## Step 2: Application entrypoint
 
-Find how production starts one unit of work. The adapter imports or calls that entrypoint. It does not reimplement the product. Record the file and symbol in the adapter docstring. Default the runner to one call (`limit=1`, `runs=1`).
+Find how production starts one unit of work. The adapter imports or calls that entrypoint. It does not reimplement the product. Record the file and symbol in the adapter docstring. Also record the application's reset or new-instance callable when product state exists. Default the notebook to `limit=1`. Set `runs` from the Eval Spec's `k`; do not choose another k.
 
 ## Step 3: Modules
 
@@ -74,7 +75,9 @@ In a scratch environment, without network and without a live model:
 - marking a shadow route required blocks the decision instead of dropping it
 - human reviews import with no LLM credential; pending reviews do not pass a required human criterion
 - a hand-computed mix of Pass, Fail, Not applicable, and Unscorable keeps denominator and counts distinct
-- overlapping development and held-out items are rejected
+- overlapping development and held-out item ids, content, `session_id`, or `episode_id` are rejected
+- `aggregate_trials` matches the trial truth table in `modules.md` for `k=1`, `pass^k`, and `pass@k`, and a `RUN_HEALTH` trial is not a `FAIL`
+- `compare_runs` refuses different `trial_mode` or `k` with `cannot compare across trial contracts`
 - with Langfuse bypassed, `langfuse` is never imported and local writer files round-trip
 - deterministic metrics match a hand-computed example; confidence intervals appear only on aggregates
 - the notebook JSON loads and every code cell passes `ast.parse`
@@ -93,4 +96,6 @@ Document variables, the diagnostic default, the gate-mode preflight, and unverif
 - Process health (the runner finished) is separate from a Product verdict.
 - Diagnostic success may exit 0 with `decision_eligible=false` and no release verdict.
 - Gate mode that fails preflight exits nonzero. That is configuration refusal, not a judge-derived Product failure.
-- k=1 evidence is one call through the real entrypoint. Best-of-N is never reported as k=1.
+- The spec chooses `k` and the mode (`k=1`, `pass^k`, or `pass@k`). The skill does not. Each trial is one fresh call through the real entrypoint. Best-of-N is never reported as `k=1` or `pass^k`.
+- Infrastructure failures are `RUN_HEALTH`, not product failures, and are counted in `run_health_count`. `aggregate_trials` follows the `modules.md` order: a valid `FAIL` decides `pass^k` and a valid `PASS` decides `pass@k` before a short trial set is `UNSCORABLE` (`incomplete trials`). `k=1` returns that trial, or `UNSCORABLE` (`incomplete trials`) when it is `RUN_HEALTH`.
+- A required criterion uses the spec judgment unit. A finer unit is diagnostic only and stays out of the gate aggregate.

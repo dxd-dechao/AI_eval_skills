@@ -642,6 +642,427 @@ F_EXPECTATIONS = {
     "observed_facts": [],
 }
 
+G_SCHEDULE = {
+    "ep-route": ["accept", "reject", "accept"],
+    "ep-depot": ["accept", "outage", "accept"],
+}
+
+G_APP = '''\
+"""Tool-using fixture. Module memory, an app reset, and an external dependency file."""
+
+from pathlib import Path
+import json
+
+_MEMORY = []
+_SCHEDULE = Path(__file__).with_name("dependency_schedule.json")
+_CURSOR = Path(__file__).with_name("dependency_cursor.json")
+
+
+def reset_episode() -> None:
+    """Clear process memory. Does not touch the dependency schedule or cursor."""
+    _MEMORY.clear()
+
+
+def _next(episode_id: str) -> str:
+    cursor = json.loads(_CURSOR.read_text()) if _CURSOR.exists() else {}
+    index = int(cursor.get(episode_id, 0))
+    schedule = json.loads(_SCHEDULE.read_text())
+    step = schedule[episode_id][index]
+    cursor[episode_id] = index + 1
+    _CURSOR.write_text(json.dumps(cursor))
+    return step
+
+
+def lookup_vendor(name: str) -> dict:
+    return {"vendor": name, "approved": True}
+
+
+def place_order(vendor: str, sku: str, qty: int) -> dict:
+    return {"order_id": f"{vendor}-{sku}", "vendor": vendor, "sku": sku, "qty": qty}
+
+
+def run_episode(request: str, episode_id: str) -> dict:
+    """Production entrypoint. Dependency steps come from dependency_schedule.json."""
+    step = _next(episode_id)
+    if step == "outage":
+        raise ConnectionError("dependency outage")
+    _MEMORY.append(episode_id)
+    vendor = "acme" if "acme" in request.lower() else "northwind"
+    looked = lookup_vendor(vendor)
+    looked["approved"] = step == "accept"
+    trajectory = [{"tool": "lookup_vendor", "args": {"name": vendor}, "result": looked}]
+    order = None
+    if looked["approved"]:
+        order = place_order(vendor, "sku-1", 1)
+        trajectory.append(
+            {"tool": "place_order", "args": {"vendor": vendor, "sku": "sku-1", "qty": 1}, "result": order}
+        )
+    return {
+        "final_state": {"accepted": looked["approved"], "order": order, "retained": len(_MEMORY)},
+        "trajectory": trajectory,
+    }
+'''
+
+G_EXPECTATIONS = {
+    "schema_version": "product-eval-contract/1",
+    "artifact": "product-expectations",
+    "state": "EVALUATOR_ROUTING",
+    "display_state": "Rubric approved — evaluator acceptance separate",
+    "inventory": [
+        {
+            "id": "mode-episode",
+            "version": "observed-1",
+            "mode": "run_episode",
+            "output": "final_state and trajectory",
+            "source": "app/worker.py:run_episode",
+        }
+    ],
+    "applicability_map": [
+        {
+            "id": "app-episode",
+            "output": "final_state and trajectory",
+            "candidate_behaviour": "The caller can see whether the order was accepted and which tools ran",
+            "product_story": "A person asks for a vendor order and receives the result",
+            "precondition": "Request text is non-empty",
+            "status": "in_scope",
+        }
+    ],
+    "story_packet": [
+        {
+            "id": "story-episode",
+            "source": "fixture expectations",
+            "scenario": "One request is handled through the available tools",
+            "judgment_unit": "episode",
+            "named_expert": "fixture-expert",
+            "exclusions": [],
+            "open_decisions": [],
+        }
+    ],
+    "decision_log": [
+        {
+            "id": "dec-feature",
+            "question": "Which user-facing behavior is in this launch?",
+            "holder": "fixture-pm",
+            "decision": "Vendor order requests handled by run_episode.",
+            "status": "decided",
+            "source": "fixture expectations",
+        }
+    ],
+    "observed_facts": [],
+}
+
+G_RUBRIC = {
+    "schema_version": "product-eval-contract/1",
+    "artifact": "rubric-register",
+    "state": "EVALUATOR_ROUTING",
+    "criteria": [
+        {
+            "id": "C-final",
+            "version": "1.0",
+            "source_expectation_id": "story-episode",
+            "applicable_unit": "episode",
+            "preconditions": "final_state is present",
+            "judgment": "final_state.accepted is true when the dependency accepts the order",
+            "pass_rule": "final_state.accepted is true",
+            "fail_rule": "final_state.accepted is false",
+            "unscorable_rule": "final_state or final_state.accepted is missing",
+            "required_evidence": "final_state",
+            "decision_consequence": {"proposal": "required for ship", "status": "approved"},
+            "approval_state": "approved",
+        },
+        {
+            "id": "C-path",
+            "version": "1.0",
+            "source_expectation_id": "story-episode",
+            "applicable_unit": "episode",
+            "preconditions": "trajectory is a list",
+            "judgment": "Only lookup_vendor and place_order run, and place_order runs only after an approved lookup",
+            "pass_rule": "every tool is lookup_vendor or place_order, and place_order appears only when the preceding lookup result approved is true",
+            "fail_rule": "a tool outside that list appears, or place_order runs when lookup approved is false",
+            "unscorable_rule": "trajectory is missing or not a list",
+            "required_evidence": "trajectory",
+            "decision_consequence": {"proposal": "required for ship", "status": "approved"},
+            "approval_state": "approved",
+        },
+    ],
+    "review": {
+        "product_domain_approver": "fixture-pm",
+        "named_expert": "fixture-expert",
+        "reviewed_examples": ["ep-route", "ep-depot"],
+        "boundary_cases": ["missing final_state is unscorable"],
+        "development_dataset": {"id": "dev-episodes", "version": "1"},
+        "disagreements": [],
+        "resolution": "fixture sign-off",
+        "unresolved_questions": [],
+        "approval_state": "approved",
+        "approved_version": "1.0",
+        "approved_date": "2026-09-25",
+    },
+}
+
+def _verification(implementation: str) -> dict:
+    return {
+        "kind": "verification",
+        "cases": [
+            {"role": "known-good", "name": "known-good", "expected": "PASS"},
+            {"role": "known-bad", "name": "known-bad", "expected": "FAIL"},
+            {"role": "edge", "name": "edge", "expected": "UNSCORABLE"},
+        ],
+        "implementation_version": implementation,
+    }
+
+
+G_ROUTES = {
+    "schema_version": "product-eval-contract/1",
+    "artifact": "evaluator-register",
+    "state": "EVALUATOR_ROUTING",
+    "routes": [
+        {
+            "criterion_id": "C-final",
+            "criterion_version": "1.0",
+            "evaluator_type": "deterministic",
+            "evaluator_id": "det-final",
+            "evaluator_version": "1.0",
+            "measurement_rationale": "accepted is a boolean on the final state",
+            "acceptance_state": "accepted",
+            "decision_eligible": True,
+            "execution_scope": "accepted",
+            "evidence": _verification("app.worker.run_episode"),
+            "provenance": {"rubric_source": "rubric-register.json"},
+            "decision_consequence": {"rule": "required", "status": "approved"},
+        },
+        {
+            "criterion_id": "C-path",
+            "criterion_version": "1.0",
+            "evaluator_type": "deterministic",
+            "evaluator_id": "det-path",
+            "evaluator_version": "1.0",
+            "measurement_rationale": "tool names and lookup approval are on the trajectory",
+            "acceptance_state": "accepted",
+            "decision_eligible": True,
+            "execution_scope": "accepted",
+            "evidence": _verification("app.worker.run_episode"),
+            "provenance": {"rubric_source": "rubric-register.json"},
+            "decision_consequence": {"rule": "required", "status": "approved"},
+        },
+    ],
+    "datasets": {
+        "development": {"id": "dev-episodes", "version": "1", "manifest": "Knowledge/dev_manifest.json"},
+        "held_out_validation": {
+            "id": "heldout-episodes",
+            "version": "1",
+            "manifest": "Knowledge/heldout_manifest.json",
+        },
+    },
+    "decision_policy": {"required_criteria": ["C-final", "C-path"], "unscorable_consequence": "block"},
+}
+
+G_DEV = {
+    "id": "dev-episodes",
+    "version": "1",
+    "items": [
+        {"id": "ep-route", "episode_id": "ep-route", "unit": "episode", "content": "order acme sku-1", "request": "order acme sku-1"},
+        {"id": "ep-depot", "episode_id": "ep-depot", "unit": "episode", "content": "order northwind sku-1", "request": "order northwind sku-1"},
+    ],
+}
+
+G_HELD = {
+    "id": "heldout-episodes",
+    "version": "1",
+    "items": [
+        {"id": "ep-hold", "episode_id": "ep-hold", "unit": "episode", "content": "order other sku-9", "request": "order other sku-9"},
+    ],
+}
+
+H_APP = '''\
+"""Multi-message fixture with module memory and an app reset."""
+
+import json
+from pathlib import Path
+
+_HISTORY = []
+_LOG = Path(__file__).with_name("dialog_log.jsonl")
+
+
+def reset_dialog() -> None:
+    _HISTORY.clear()
+
+
+def continue_dialog(history: list, message: str) -> dict:
+    """Production entrypoint. One user message in, one reply out."""
+    prior = list(history or [])
+    incoming = len(prior)
+    reply = message.strip()[:80]
+    prior.append({"speaker": "person", "text": message})
+    prior.append({"speaker": "assistant", "text": reply})
+    _HISTORY.extend(prior)
+    row = {"message": message, "incoming": incoming, "retained": len(_HISTORY)}
+    with _LOG.open("a") as handle:
+        handle.write(json.dumps(row) + "\\n")
+    return {"history": prior, "reply": reply, "retained": len(_HISTORY)}
+'''
+
+H_EXPECTATIONS = {
+    "schema_version": "product-eval-contract/1",
+    "artifact": "product-expectations",
+    "state": "EVALUATOR_ROUTING",
+    "display_state": "Rubric approved — evaluator acceptance separate",
+    "inventory": [
+        {
+            "id": "mode-session",
+            "version": "observed-1",
+            "mode": "continue_dialog",
+            "output": "history and reply",
+            "source": "app/dialog.py:continue_dialog",
+        }
+    ],
+    "applicability_map": [
+        {
+            "id": "app-session",
+            "output": "history and reply",
+            "candidate_behaviour": "Replies stay on the messages in the session",
+            "product_story": "A person sends several messages and receives replies",
+            "precondition": "Each message is non-empty",
+            "status": "in_scope",
+        }
+    ],
+    "story_packet": [
+        {
+            "id": "story-session",
+            "source": "fixture expectations",
+            "scenario": "Several messages in one exchange",
+            "judgment_unit": "session",
+            "named_expert": "fixture-expert",
+            "exclusions": [],
+            "open_decisions": [],
+        }
+    ],
+    "decision_log": [],
+    "observed_facts": [],
+}
+
+H_RUBRIC = {
+    "schema_version": "product-eval-contract/1",
+    "artifact": "rubric-register",
+    "state": "EVALUATOR_ROUTING",
+    "criteria": [
+        {
+            "id": "C-session",
+            "version": "1.0",
+            "source_expectation_id": "story-session",
+            "applicable_unit": "session",
+            "preconditions": "the session has ordered turns",
+            "judgment": "Each reply equals the stripped user message truncated to 80 characters",
+            "pass_rule": "every turn reply equals message.strip()[:80]",
+            "fail_rule": "any turn reply differs",
+            "unscorable_rule": "a turn is missing a reply",
+            "required_evidence": "ordered turn outputs",
+            "decision_consequence": {"proposal": "required for ship", "status": "approved"},
+            "approval_state": "approved",
+        },
+        {
+            "id": "C-turn",
+            "version": "1.0",
+            "source_expectation_id": "story-session",
+            "applicable_unit": "turn",
+            "preconditions": "one user message",
+            "judgment": "The turn reply is non-empty",
+            "pass_rule": "reply after strip is non-empty",
+            "fail_rule": "reply after strip is empty",
+            "unscorable_rule": "reply is missing",
+            "required_evidence": "that turn's reply",
+            "decision_consequence": {"proposal": "diagnostic only", "status": "approved"},
+            "approval_state": "approved",
+        },
+    ],
+    "review": {
+        "product_domain_approver": "fixture-pm",
+        "named_expert": "fixture-expert",
+        "reviewed_examples": ["sess-1"],
+        "boundary_cases": ["empty reply is a turn fail and does not replace the session judgment"],
+        "development_dataset": {"id": "dev-sessions", "version": "1"},
+        "disagreements": [],
+        "resolution": "fixture sign-off",
+        "unresolved_questions": [],
+        "approval_state": "approved",
+        "approved_version": "1.0",
+        "approved_date": "2026-09-25",
+    },
+}
+
+H_ROUTES = {
+    "schema_version": "product-eval-contract/1",
+    "artifact": "evaluator-register",
+    "state": "EVALUATOR_ROUTING",
+    "routes": [
+        {
+            "criterion_id": "C-session",
+            "criterion_version": "1.0",
+            "evaluator_type": "deterministic",
+            "evaluator_id": "det-session",
+            "evaluator_version": "1.0",
+            "measurement_rationale": "reply text is a string compare against the user message",
+            "acceptance_state": "accepted",
+            "decision_eligible": True,
+            "execution_scope": "accepted",
+            "evidence": _verification("app.dialog.continue_dialog"),
+            "provenance": {"rubric_source": "rubric-register.json"},
+            "decision_consequence": {"rule": "required", "status": "approved"},
+        },
+        {
+            "criterion_id": "C-turn",
+            "criterion_version": "1.0",
+            "evaluator_type": "deterministic",
+            "evaluator_id": "det-turn",
+            "evaluator_version": "1.0",
+            "measurement_rationale": "a single turn reply is observable but is not the session judgment",
+            "acceptance_state": "accepted",
+            "decision_eligible": False,
+            "execution_scope": "DIAGNOSTIC/SHADOW ONLY",
+            "evidence": _verification("app.dialog.continue_dialog"),
+            "provenance": {"rubric_source": "rubric-register.json"},
+            "decision_consequence": {"rule": "diagnostic", "status": "approved"},
+        },
+    ],
+    "datasets": {
+        "development": {"id": "dev-sessions", "version": "1", "manifest": "Knowledge/dev_manifest.json"},
+        "held_out_validation": {
+            "id": "heldout-sessions",
+            "version": "1",
+            "manifest": "Knowledge/heldout_manifest.json",
+        },
+    },
+    "decision_policy": {"required_criteria": ["C-session"], "unscorable_consequence": "block"},
+}
+
+H_DEV = {
+    "id": "dev-sessions",
+    "version": "1",
+    "items": [
+        {
+            "id": "sess-1",
+            "session_id": "sess-1",
+            "unit": "session",
+            "content": "hello | status please",
+            "turns": ["hello", "status please"],
+        }
+    ],
+}
+
+H_HELD = {
+    "id": "heldout-sessions",
+    "version": "1",
+    "items": [
+        {
+            "id": "sess-9",
+            "session_id": "sess-9",
+            "unit": "session",
+            "content": "other topic",
+            "turns": ["other topic"],
+        }
+    ],
+}
+
 PROMPTS = {
     "A": "Design an eval for this app and build the harness.\n",
     "B": "Design an eval for this app and build the harness.\n",
@@ -649,6 +1070,8 @@ PROMPTS = {
     "D": "Design an eval for this app and build the harness.\n",
     "E": "Design an eval for this app and build the harness.\n",
     "F": "Design an eval for this app and build the harness.\n",
+    "G": "Design an eval for this app and build the harness.\n",
+    "H": "Design an eval for this app and build the harness.\n",
 }
 PLUMBING_PROMPT = "Please add neutral execution plumbing so we can call the app and save local results.\n"
 
@@ -788,6 +1211,65 @@ def prepare(root: Path) -> None:
         json.dumps({"case": "F-dialog-missing-unit", "prompt": "PROMPT.md", "entrypoint": "app.dialog.continue_dialog"}, indent=2) + "\n",
     )
     _git_init(f_repo)
+
+    g_repo = root / "G-episode-approved"
+    _write(g_repo / "app" / "worker.py", G_APP)
+    _write(g_repo / "app" / "__init__.py", "")
+    _write(g_repo / "app" / "dependency_schedule.json", json.dumps(G_SCHEDULE, indent=2) + "\n")
+    _write(
+        g_repo / "README.md",
+        "# Order helper\n\nCallable entrypoint: `app.worker.run_episode(request: str, episode_id: str) -> dict`.\n"
+        "Reset: `app.worker.reset_episode()`. The dependency schedule file is outside that reset.\n",
+    )
+    _write(g_repo / "PROMPT.md", PROMPTS["G"])
+    _write(g_repo / "Knowledge" / "product-expectations.json", json.dumps(G_EXPECTATIONS, indent=2) + "\n")
+    _write(g_repo / "Knowledge" / "product-expectations.md", "# Fixture expectations\n\nSee product-expectations.json.\n")
+    _write(g_repo / "Knowledge" / "rubric-register.json", json.dumps(G_RUBRIC, indent=2) + "\n")
+    _write(g_repo / "Knowledge" / "evaluator-register.json", json.dumps(G_ROUTES, indent=2) + "\n")
+    _write(g_repo / "Knowledge" / "dev_manifest.json", json.dumps(G_DEV, indent=2) + "\n")
+    _write(g_repo / "Knowledge" / "heldout_manifest.json", json.dumps(G_HELD, indent=2) + "\n")
+    g_spec = _ready_spec(
+        "A person asks for a vendor order and receives the result.",
+        "episode",
+        mode="pass^k",
+        k=3,
+    )
+    g_spec["judgment_unit"] = "episode"
+    _write_spec(g_repo, g_spec)
+    _write(
+        g_repo / "INPUT_MANIFEST.json",
+        json.dumps({"case": "G-episode-approved", "prompt": "PROMPT.md", "entrypoint": "app.worker.run_episode"}, indent=2) + "\n",
+    )
+    _git_init(g_repo)
+
+    h_repo = root / "H-session-approved"
+    _write(h_repo / "app" / "dialog.py", H_APP)
+    _write(h_repo / "app" / "__init__.py", "")
+    _write(
+        h_repo / "README.md",
+        "# Dialog helper\n\nCallable entrypoint: `app.dialog.continue_dialog(history: list, message: str) -> dict`.\n"
+        "Reset: `app.dialog.reset_dialog()`.\n",
+    )
+    _write(h_repo / "PROMPT.md", PROMPTS["H"])
+    _write(h_repo / "Knowledge" / "product-expectations.json", json.dumps(H_EXPECTATIONS, indent=2) + "\n")
+    _write(h_repo / "Knowledge" / "product-expectations.md", "# Fixture expectations\n\nSee product-expectations.json.\n")
+    _write(h_repo / "Knowledge" / "rubric-register.json", json.dumps(H_RUBRIC, indent=2) + "\n")
+    _write(h_repo / "Knowledge" / "evaluator-register.json", json.dumps(H_ROUTES, indent=2) + "\n")
+    _write(h_repo / "Knowledge" / "dev_manifest.json", json.dumps(H_DEV, indent=2) + "\n")
+    _write(h_repo / "Knowledge" / "heldout_manifest.json", json.dumps(H_HELD, indent=2) + "\n")
+    h_spec = _ready_spec(
+        "A person exchanges a series of messages and receives replies.",
+        "session",
+        mode="k=1",
+        k=1,
+    )
+    h_spec["judgment_unit"] = "session"
+    _write_spec(h_repo, h_spec)
+    _write(
+        h_repo / "INPUT_MANIFEST.json",
+        json.dumps({"case": "H-session-approved", "prompt": "PROMPT.md", "entrypoint": "app.dialog.continue_dialog"}, indent=2) + "\n",
+    )
+    _git_init(h_repo)
     print(root)
 
 

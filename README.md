@@ -22,7 +22,7 @@ That evaluator is accepted separately, with its own evidence, before it can supp
 | Expectations supplied, rubric not approved | Candidate binary criteria and a review packet. Stops before evaluators. |
 | Rubric approved | Per-criterion routes, dataset split, Langfuse registry, harness spec, HTML. Unaccepted evaluators stay diagnostic. |
 
-Each state writes readable Markdown beside a JSON register the harness can validate: `eval-spec.json`, `product-expectations.json`, `rubric-register.json`, `evaluator-register.json`, plus separately versioned development and held-out manifests. Gate mode runs only when the Eval Spec is ready and its trial contract is `k=1` with one run.
+Each state writes readable Markdown beside a JSON register the harness can validate: `eval-spec.json`, `product-expectations.json`, `rubric-register.json`, `evaluator-register.json`, plus separately versioned development and held-out manifests. Gate mode runs only when the Eval Spec is ready. The spec's trial contract (`k=1`, `pass^k`, or `pass@k`, with its k) and judgment unit (`output`, `session`, or `episode`) are executed as written.
 
 Factual architecture documents (when code is explored):
 
@@ -43,7 +43,7 @@ Reads the registers in the target repo (it does not need the design skill instal
 When the registers are ready it produces:
 
 - **`eval_harness/` package** — adapter that calls the real app, contract preflight, route-specific evaluators, metrics that keep Pass/Fail, Not applicable, and Unscorable apart, fail-closed gates, and a local results writer with a total Langfuse bypass
-- **Diagnostic notebook** — one configure cell; default `MODE=diagnostic`, `LIMIT=1`, `RUNS=1`; a thin slice is not a release pass
+- **Diagnostic notebook** — one configure cell; default `MODE=diagnostic`, `LIMIT=1`; `RUNS` is the spec's k; a thin slice is not a release pass
 - **Offline checks** — approval and version refusal, shadow isolation, denominator counts, disjoint held-out data, metric arithmetic, local writer round-trip
 
 Invariants: diagnostic success can exit 0 with `decision_eligible=false`; gate mode refuses bad config before scoring; empty checks do not pass; confidence intervals only on aggregates; Langfuse is never imported when bypassed.
@@ -60,7 +60,7 @@ Invariants: diagnostic success can exit 0 with `decision_eligible=false`; gate m
 
 ## Best fit
 
-Any LLM feature whose user-facing outcome can be stated as atomic Pass/Fail criteria. Patterns cover classification, open-ended generative, rubric scoring, conversational, and agentic outputs. Harness execution is k=1 until multi-trial support lands.
+Any LLM feature whose user-facing outcome can be stated as atomic Pass/Fail criteria. Patterns cover classification, open-ended generative, rubric scoring, conversational, and agentic outputs. The harness executes the Eval Spec's trial contract (`k=1`, `pass^k`, or `pass@k`) and judgment unit (`output`, `session`, or task `episode`). It does not choose k, compare runs across different k, or fold turn-level diagnostics into a session result.
 
 ## Usage
 

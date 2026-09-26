@@ -196,7 +196,7 @@ def check_b(repo: Path, report: Report) -> None:
 def _import_harness(repo: Path):
     sys.path.insert(0, str(repo))
     for name in list(sys.modules):
-        if name == "eval_harness" or name.startswith("eval_harness."):
+        if name in {"eval_harness", "app"} or name.startswith("eval_harness.") or name.startswith("app."):
             del sys.modules[name]
     return importlib.import_module("eval_harness")
 
@@ -904,9 +904,9 @@ def _check_unsupported_contract(c_repo: Path, report: Report, case: str) -> None
         reason = pre.blocked_reason if hasattr(pre, "blocked_reason") else pre.get("blocked_reason")
         ok_flag = pre.ok if hasattr(pre, "ok") else pre.get("ok")
         text = str(reason or "")
-        return ok_flag is False and "unsupported trial contract" in text and "pass^k" in text and "3" in text, text
+        return ok_flag is False and text == "runs mismatch: config.runs=1 spec k=3", text
 
-    _run_probe(report, case, "gate-unsupported-trial-contract", _probe)
+    _run_probe(report, case, "gate-runs-mismatch", _probe)
 
     def _not_ready():
         if not (c_repo / "eval_harness").exists():
@@ -978,6 +978,326 @@ def check_f(repo: Path, report: Report) -> None:
     report.add(case, "no-unit-choice", open_unit and not chosen, "turn or session chosen" if chosen else "unit unanswered")
 
 
+def _jsonl(path: Path) -> list:
+    if not path.exists():
+        return []
+    rows = []
+    for line in path.read_text().splitlines():
+        if line.strip():
+            rows.append(json.loads(line))
+    return rows
+
+
+def _row_kind(row: dict) -> str:
+    return str(row.get("row_kind") or row.get("kind") or "")
+
+
+def _trial_rows(rows: list, item_id: str) -> list:
+    found = []
+    for row in rows:
+        if str(row.get("item_id")) != item_id:
+            continue
+        if "trial_index" in row and _row_kind(row) in ("", "trial"):
+            found.append(row)
+    return sorted(found, key=lambda row: row.get("trial_index"))
+
+
+def _item_row(rows: list, item_id: str) -> dict:
+    for row in rows:
+        if str(row.get("item_id")) == item_id and _row_kind(row) in ("item", "aggregate"):
+            return row
+    for row in rows:
+        if str(row.get("item_id")) == item_id and "trial_index" not in row:
+            return row
+    return {}
+
+
+def check_g(repo: Path, report: Report) -> None:
+    case = "G"
+
+    def _run():
+        if not (repo / "eval_harness").exists():
+            return False, "harness missing"
+        _import_harness(repo)
+        from eval_harness.run_eval import run
+
+        cursor = repo / "app" / "dependency_cursor.json"
+        if cursor.exists():
+            cursor.unlink()
+        result = run(_config(repo, mode="gate", runs=3, limit=2, results_dir=str(repo / "results-g")), limit=2)
+        payload = _payload(result)
+        box = {"payload": payload, "cursor": json.loads(cursor.read_text()) if cursor.exists() else {}}
+        check_g._box = box
+        return True, f"exit={payload.get('exit_code')}"
+
+    if _run_probe(report, case, "gate-run", _run) is not True:
+        for name in (
+            "k-calls",
+            "fresh-state",
+            "trial-rows",
+            "passk-fail",
+            "pass-at-k",
+            "aggregate-precedence",
+            "run-health",
+            "runs-mismatch",
+            "isolation-unverified",
+            "compare-refuses",
+            "episode-id-disjoint",
+            "versions-stamped",
+        ):
+            report.add(case, name, False, "gate run failed")
+        return
+
+    def _k_calls():
+        cursor = check_g._box["cursor"]
+        ok = cursor.get("ep-route") == 3 and cursor.get("ep-depot") == 3
+        return ok, str(cursor)
+
+    def _fresh():
+        rows = _jsonl(repo / "results-g" / "items.jsonl")
+        trials = _trial_rows(rows, "ep-route") + [row for row in _trial_rows(rows, "ep-depot") if row.get("status") != "RUN_HEALTH"]
+        retained = []
+        for row in trials:
+            raw = row.get("raw_output") or {}
+            final = raw.get("final_state") or {}
+            retained.append(final.get("retained"))
+        ok = bool(retained) and all(value == 1 for value in retained)
+        return ok, str(retained)
+
+    def _trial_rows_probe():
+        rows = _jsonl(repo / "results-g" / "items.jsonl")
+        route = _trial_rows(rows, "ep-route")
+        indexes = [row.get("trial_index") for row in route]
+        return indexes == [0, 1, 2], str(indexes)
+
+    def _passk():
+        rows = _jsonl(repo / "results-g" / "items.jsonl")
+        item = _item_row(rows, "ep-route")
+        return item.get("status") == "FAIL", str(item.get("status"))
+
+    def _pass_at():
+        _import_harness(repo)
+        from eval_harness.metrics import aggregate_trials
+
+        rows = _jsonl(repo / "results-g" / "items.jsonl")
+        statuses = [row.get("status") for row in _trial_rows(rows, "ep-route")]
+        aggregated = aggregate_trials(statuses, "pass@k", 3)
+        status = aggregated.get("status") if isinstance(aggregated, dict) else getattr(aggregated, "status", None)
+        return status == "PASS", f"trials={statuses} aggregated={status}"
+
+    def _precedence():
+        _import_harness(repo)
+        from eval_harness.metrics import aggregate_trials
+
+        rows = (
+            ("pass^k", ["FAIL", "RUN_HEALTH", "PASS"], "FAIL", False),
+            ("pass@k", ["PASS", "RUN_HEALTH", "FAIL"], "PASS", False),
+            ("pass^k", ["PASS", "PASS", "RUN_HEALTH"], "UNSCORABLE", True),
+            ("pass@k", ["FAIL", "FAIL", "RUN_HEALTH"], "UNSCORABLE", True),
+        )
+        details = []
+        ok = True
+        for mode, statuses, expected, incomplete in rows:
+            aggregated = aggregate_trials(statuses, mode, 3)
+            status = aggregated.get("status") if isinstance(aggregated, dict) else getattr(aggregated, "status", None)
+            reason = aggregated.get("reason") if isinstance(aggregated, dict) else getattr(aggregated, "reason", "")
+            reason = "" if reason is None else str(reason)
+            row_ok = status == expected and (not incomplete or "incomplete trials" in reason)
+            ok = ok and row_ok
+            details.append(f"{mode} {statuses} -> {status} {reason}")
+        return ok, "; ".join(details)
+
+    def _health():
+        rows = _jsonl(repo / "results-g" / "items.jsonl")
+        depot = _trial_rows(rows, "ep-depot")
+        health = [row for row in depot if row.get("status") == "RUN_HEALTH"]
+        item = _item_row(rows, "ep-depot")
+        summary = _load(repo / "results-g" / "summary.json") or {}
+        meta = _load(repo / "results-g" / "run_meta.json") or {}
+        run_health = summary.get("run_health_count", meta.get("run_health_count"))
+        fail_count = summary.get("fail_count")
+        reason = str(item.get("reason") or "")
+        ok = (
+            len(health) == 1
+            and health[0].get("trial_index") == 1
+            and item.get("status") == "UNSCORABLE"
+            and "incomplete trials" in reason
+            and run_health == 1
+            and fail_count == 1
+        )
+        return ok, f"health={len(health)} item={item.get('status')} reason={reason} run_health={run_health} fail={fail_count}"
+
+    def _mismatch():
+        _import_harness(repo)
+        from eval_harness.contract import preflight_gate
+
+        pre = preflight_gate(_config(repo, mode="gate", runs=1, limit=2))
+        reason = pre.blocked_reason if hasattr(pre, "blocked_reason") else pre.get("blocked_reason")
+        ok_flag = pre.ok if hasattr(pre, "ok") else pre.get("ok")
+        return ok_flag is False and reason == "runs mismatch: config.runs=1 spec k=3", str(reason)
+
+    def _isolation():
+        _import_harness(repo)
+        from eval_harness.contract import preflight_gate
+        from eval_harness.run_eval import run
+
+        staged_root = Path(tempfile.mkdtemp(prefix="ai-eval-g-isolation-"))
+        staged = staged_root / "app-copy"
+        shutil.copytree(repo, staged, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "results-g"))
+        worker = staged / "app" / "worker.py"
+        text = worker.read_text()
+        text = text.replace("def reset_episode() -> None:", "def _reset_removed() -> None:")
+        worker.write_text(text)
+        sys.path.insert(0, str(staged))
+        for name in list(sys.modules):
+            if name in {"app", "eval_harness"} or name.startswith("app.") or name.startswith("eval_harness."):
+                del sys.modules[name]
+        importlib.invalidate_caches()
+        pre = preflight_gate(_config(staged, mode="gate", runs=3, limit=2, results_dir=str(staged / "results-iso")))
+        reason = pre.blocked_reason if hasattr(pre, "blocked_reason") else pre.get("blocked_reason")
+        result = run(_config(staged, mode="gate", runs=3, limit=2, results_dir=str(staged / "results-iso")), limit=2)
+        payload = _payload(result)
+        ok = reason == "trial isolation unverified" and payload.get("exit_code") == 2 and payload.get("quality_evaluated") is False
+        return ok, f"reason={reason} exit={payload.get('exit_code')} quality={payload.get('quality_evaluated')}"
+
+    def _compare():
+        _import_harness(repo)
+        from eval_harness.metrics import compare_runs
+
+        try:
+            compare_runs({"trial_mode": "pass^k", "k": 3}, {"trial_mode": "k=1", "k": 1})
+        except ValueError as exc:
+            return str(exc) == "cannot compare across trial contracts", str(exc)
+        return False, "compare_runs returned"
+
+    def _disjoint():
+        _import_harness(repo)
+        from eval_harness.dataset_loader import assert_held_out_disjoint
+
+        try:
+            assert_held_out_disjoint(
+                {"items": [{"id": "a", "episode_id": "same", "content": "one"}]},
+                {"items": [{"id": "b", "episode_id": "same", "content": "two"}]},
+            )
+        except ValueError as exc:
+            return True, str(exc)
+        return False, "shared episode_id accepted"
+
+    _run_probe(report, case, "k-calls", _k_calls)
+    _run_probe(report, case, "fresh-state", _fresh)
+    _run_probe(report, case, "trial-rows", _trial_rows_probe)
+    _run_probe(report, case, "passk-fail", _passk)
+    _run_probe(report, case, "pass-at-k", _pass_at)
+    _run_probe(report, case, "aggregate-precedence", _precedence)
+    _run_probe(report, case, "run-health", _health)
+    _run_probe(report, case, "runs-mismatch", _mismatch)
+    _run_probe(report, case, "isolation-unverified", _isolation)
+    def _versions():
+        meta = _load(repo / "results-g" / "run_meta.json") or {}
+        summary = _load(repo / "results-g" / "summary.json") or {}
+        needed = ("suite_version", "dataset_version", "evaluator_version", "harness_version", "trial_policy_version")
+        missing = [key for key in needed if not meta.get(key)]
+        counts_ok = summary.get("trial_pass_count") == 4 and summary.get("trial_count") == 6 and summary.get("k") == 3 and summary.get("trial_mode") == "pass^k"
+        return not missing and counts_ok, f"missing={missing} pass={summary.get('trial_pass_count')} trials={summary.get('trial_count')} mode={summary.get('trial_mode')}"
+
+    _run_probe(report, case, "compare-refuses", _compare)
+    _run_probe(report, case, "episode-id-disjoint", _disjoint)
+    _run_probe(report, case, "versions-stamped", _versions)
+
+
+def check_h(repo: Path, report: Report) -> None:
+    case = "H"
+
+    def _run():
+        if not (repo / "eval_harness").exists():
+            return False, "harness missing"
+        log = repo / "app" / "dialog_log.jsonl"
+        if log.exists():
+            log.unlink()
+        _import_harness(repo)
+        from eval_harness.run_eval import run
+
+        result = run(_config(repo, mode="gate", runs=1, limit=1, results_dir=str(repo / "results-h")), limit=1)
+        payload = _payload(result)
+        check_h._payload = payload
+        return payload.get("exit_code") == 0, f"exit={payload.get('exit_code')} verdict={payload.get('release_verdict')}"
+
+    if _run_probe(report, case, "gate-run", _run) is not True:
+        for name in ("one-session-denominator", "turns-in-order", "turn-not-in-gate", "unit-mismatch", "session-id-disjoint"):
+            report.add(case, name, False, "gate run failed")
+        return
+
+    def _denominator():
+        summary = _load(repo / "results-h" / "summary.json") or {}
+        return summary.get("denominator") == 1 and summary.get("pass_count") == 1, str(summary.get("denominator"))
+
+    def _order():
+        log = repo / "app" / "dialog_log.jsonl"
+        rows = _jsonl(log)
+        ok = (
+            len(rows) == 2
+            and rows[0].get("message") == "hello"
+            and rows[0].get("incoming") == 0
+            and rows[1].get("message") == "status please"
+            and rows[1].get("incoming") == 2
+        )
+        return ok, str(rows)
+
+    def _turn_out():
+        summary = _load(repo / "results-h" / "summary.json") or {}
+        blob = json.dumps(summary)
+        decision = _load(repo / "results-h" / "decision.json") or {}
+        rows = _jsonl(repo / "results-h" / "items.jsonl")
+        diagnostic = [row for row in rows if row.get("criterion_id") == "C-turn" or _row_kind(row) == "diagnostic"]
+        in_gate = "C-turn" in json.dumps(decision.get("required_shadow_ids") or decision)
+        in_top = "C-turn" in blob and summary.get("denominator") != 1
+        return bool(diagnostic) and not in_gate and not in_top, f"diagnostic={len(diagnostic)} denominator={summary.get('denominator')}"
+
+    def _unit():
+        _import_harness(repo)
+        from eval_harness.contract import preflight_gate
+
+        register = _load(repo / "Knowledge" / "evaluator-register.json")
+        rubric = _load(repo / "Knowledge" / "rubric-register.json")
+        for row in register.get("routes") or []:
+            if row.get("criterion_id") == "C-turn":
+                row["decision_eligible"] = True
+                row["execution_scope"] = "accepted"
+                row["decision_consequence"] = {"rule": "required", "status": "approved"}
+        register["decision_policy"] = {"required_criteria": ["C-session", "C-turn"], "unscorable_consequence": "block"}
+        with tempfile.TemporaryDirectory(prefix="ai-eval-h-unit-") as tmp:
+            root = Path(tmp)
+            reg_path = root / "evaluator-register.json"
+            rub_path = root / "rubric-register.json"
+            reg_path.write_text(json.dumps(register))
+            rub_path.write_text(json.dumps(rubric))
+            pre = preflight_gate(
+                _config(repo, mode="gate", runs=1, evaluator_register_path=str(reg_path), rubric_path=str(rub_path))
+            )
+        reason = pre.blocked_reason if hasattr(pre, "blocked_reason") else pre.get("blocked_reason")
+        text = str(reason or "")
+        return text.startswith("unit mismatch: C-turn turn != session"), text
+
+    def _disjoint():
+        _import_harness(repo)
+        from eval_harness.dataset_loader import assert_held_out_disjoint
+
+        try:
+            assert_held_out_disjoint(
+                {"items": [{"id": "a", "session_id": "same", "content": "one"}]},
+                {"items": [{"id": "b", "session_id": "same", "content": "two"}]},
+            )
+        except ValueError as exc:
+            return True, str(exc)
+        return False, "shared session_id accepted"
+
+    _run_probe(report, case, "one-session-denominator", _denominator)
+    _run_probe(report, case, "turns-in-order", _order)
+    _run_probe(report, case, "turn-not-in-gate", _turn_out)
+    _run_probe(report, case, "unit-mismatch", _unit)
+    _run_probe(report, case, "session-id-disjoint", _disjoint)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", required=True)
@@ -991,6 +1311,8 @@ def main() -> None:
         "D-approved-unrouted": check_d,
         "E-episode-unapproved": check_e,
         "F-dialog-missing-unit": check_f,
+        "G-episode-approved": check_g,
+        "H-session-approved": check_h,
     }
     for name, fn in mapping.items():
         repo = root / name
